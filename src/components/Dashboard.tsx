@@ -5,40 +5,51 @@ import { useEffect, useState } from 'react'
 import { Project, Resource } from '@/types/database.types'
 import StatsCard from '@/components/StatsCard'
 import ProjectList from '@/components/ProjectList'
+import NewProjectForm from '@/components/NewProjectForm'
+import ResourceManager from '@/components/ResourceManager'
+import ResourceCalendar from '@/components/ResourceCalendar'
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [resources, setResources] = useState<Resource[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [showNewProjectForm, setShowNewProjectForm] = useState(false)
+  const [showResourceManager, setShowResourceManager] = useState(false)
+  const [showResourceCalendar, setShowResourceCalendar] = useState(false)
 
   useEffect(() => {
-    async function loadDashboardData() {
-      try {
-        // Carregar projetos
-        const { data: projectsData } = await supabase
-          .from('projects')
-          .select('*')
-          .eq('is_active', true)
-          .order('created_at', { ascending: false })
-
-        // Carregar recursos
-        const { data: resourcesData } = await supabase
-          .from('resources')
-          .select('*')
-          .eq('is_active', true)
-          .order('role', { ascending: true })
-
-        setProjects(projectsData || [])
-        setResources(resourcesData || [])
-      } catch (error) {
-        console.error('Erro ao carregar dados:', error)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
     loadDashboardData()
   }, [])
+
+  async function loadDashboardData() {
+    try {
+      // Carregar projetos
+      const { data: projectsData } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+
+      // Carregar recursos
+      const { data: resourcesData } = await supabase
+        .from('resources')
+        .select('*')
+        .eq('is_active', true)
+        .order('role', { ascending: true })
+
+      setProjects(projectsData || [])
+      setResources(resourcesData || [])
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  function handleNewProjectSuccess() {
+    setShowNewProjectForm(false)
+    loadDashboardData() // Recarregar dados
+  }
 
   // Calcular estatísticas
   const stats = {
@@ -84,9 +95,26 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="flex space-x-3">
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2">
+            <button 
+              onClick={() => setShowNewProjectForm(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+            >
               <span>➕</span>
               <span>Novo Projeto</span>
+            </button>
+            <button 
+              onClick={() => setShowResourceManager(true)}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
+            >
+              <span>👥</span>
+              <span>Recursos</span>
+            </button>
+            <button 
+              onClick={() => setShowResourceCalendar(true)}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center space-x-2"
+            >
+              <span>📅</span>
+              <span>Calendário</span>
             </button>
             <button className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2">
               <span>📊</span>
@@ -163,10 +191,21 @@ export default function Dashboard() {
               <div className="text-sm font-medium text-gray-700">Calendário</div>
               <div className="text-xs text-gray-500 mt-1">Ver recursos</div>
             </button>
-            <button className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-center group">
+            <button 
+              onClick={() => setShowResourceManager(true)}
+              className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-center group"
+            >
               <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">👥</div>
               <div className="text-sm font-medium text-gray-700">Recursos</div>
               <div className="text-xs text-gray-500 mt-1">Gerenciar equipe</div>
+            </button>
+            <button 
+              onClick={() => setShowResourceCalendar(true)}
+              className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-center group"
+            >
+              <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">📅</div>
+              <div className="text-sm font-medium text-gray-700">Calendário</div>
+              <div className="text-xs text-gray-500 mt-1">Timeline de alocações</div>
             </button>
             <button className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-center group">
               <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">📋</div>
@@ -186,6 +225,28 @@ export default function Dashboard() {
           <p>Sistema de Gestão Multi-Projeto • Conectado ao Supabase • {stats.totalResources} recursos ativos</p>
         </div>
       </div>
+
+      {/* Modal do Formulário */}
+      {showNewProjectForm && (
+        <NewProjectForm 
+          onClose={() => setShowNewProjectForm(false)}
+          onSuccess={handleNewProjectSuccess}
+        />
+      )}
+
+      {/* Modal do Gerenciador de Recursos */}
+      {showResourceManager && (
+        <ResourceManager 
+          onClose={() => setShowResourceManager(false)}
+        />
+      )}
+
+      {/* Modal do Calendário de Recursos */}
+      {showResourceCalendar && (
+        <ResourceCalendar 
+          onClose={() => setShowResourceCalendar(false)}
+        />
+      )}
     </div>
   )
 }
