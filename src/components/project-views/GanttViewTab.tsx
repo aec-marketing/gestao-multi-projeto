@@ -42,13 +42,41 @@ const styles = `
   .animate-slide-up {
     animation: slide-up 0.3s ease-out;
   }
-  [draggable="true"] {
-    cursor: move;
+
+  .drag-handle {
+    cursor: grab;
   }
-  
-  [draggable="true"]:active {
+
+  .drag-handle:active {
     cursor: grabbing;
   }
+
+  .dragging-row {
+    opacity: 0.5;
+    background: #e0f2fe;
+  }
+
+  .drag-over-row {
+    border-top: 3px solid #3b82f6 !important;
+    background: #eff6ff;
+  }
+
+  .resizing {
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    cursor: ew-resize !important;
+  }
+
+  .task-bar-resizing {
+    transition: none !important;
+  }
+
+  .task-bar-normal {
+    transition: width 0.15s ease-out;
+  }
+
   .glassmorphism-panel {
     background: rgba(255, 255, 255, 0.85);
     backdrop-filter: blur(10px);
@@ -72,7 +100,24 @@ export default function GanttViewTab({
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
 
 const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
+// ADICIONE ESTES STATES DE FILTRO:
+const [filterType, setFilterType] = useState<string>('all')
+const [filterPerson, setFilterPerson] = useState<string>('all')
+const [filterProgress, setFilterProgress] = useState<string>('all')
+// ADICIONE ESTES STATES PARA RESIZE:
+const [resizingTask, setResizingTask] = useState<{
+  taskId: string
+  edge: 'start' | 'end'
+  startX: number
+  startWidth: number
+  startLeft: number
+} | null>(null)
 
+// Estado para armazenar durações temporárias durante o resize
+const [tempDurations, setTempDurations] = useState<Map<string, number>>(new Map())
+
+// Estado para armazenar offset de posição temporário (para alça esquerda)
+const [tempStartOffsets, setTempStartOffsets] = useState<Map<string, number>>(new Map())
 
   function calculateTaskDates(): TaskWithDates[] {
     if (!project?.start_date) return []
@@ -114,11 +159,14 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
             const subEnd = parseLocalDate(subtask.end_date)
             if (!subStart || !subEnd) return
 
+            // Calcular duração REAL baseada nas datas (não usar subtask.duration)
+            const realDuration = Math.floor((subEnd.getTime() - subStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
+
             processedSubtasks.push({
               ...subtask,
               start_date: subStart,
               end_date: subEnd,
-              duration_days: Math.ceil(subtask.duration)
+              duration_days: realDuration
             })
           } else {
             // Subtarefa sem datas - usar início da tarefa pai
@@ -137,7 +185,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
           }
         })
 
-        // Se há subtarefas com datas, ajustar início/fim da tarefa pai para cobrir todas (incluindo gaps)
+        // Se há subtarefas com datas, calcular início/fim baseado nelas + margens
         if (processedSubtasks.length > 0) {
           const earliestSubtaskStart = processedSubtasks.reduce((earliest, sub) => {
             return sub.start_date < earliest ? sub.start_date : earliest
@@ -147,12 +195,19 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
             return sub.end_date > latest ? sub.end_date : latest
           }, processedSubtasks[0].end_date)
 
-          // Usar o intervalo das subtarefas se for maior que o da tarefa pai
-          taskStartDate = earliestSubtaskStart < taskStartDate ? earliestSubtaskStart : taskStartDate
-          taskEndDate = latestSubtaskEnd > taskEndDate ? latestSubtaskEnd : taskEndDate
+          // Aplicar margens (folga antes e depois das subtarefas)
+          const marginStart = task.margin_start || 0
+          const marginEnd = task.margin_end || 0
+
+          // Calcular datas da tarefa principal com margens
+          taskStartDate = new Date(earliestSubtaskStart)
+          taskStartDate.setDate(taskStartDate.getDate() - Math.ceil(marginStart))
+
+          taskEndDate = new Date(latestSubtaskEnd)
+          taskEndDate.setDate(taskEndDate.getDate() + Math.ceil(marginEnd))
         }
 
-        // Calcular duração real incluindo gaps (do primeiro ao último dia)
+        // Calcular duração real incluindo gaps e margens
         const taskDuration = Math.floor((taskEndDate.getTime() - taskStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
 
         // Adicionar tarefa principal
@@ -178,7 +233,13 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
         if (subtasks.length > 0) {
           // Processar subtarefas sequencialmente
           const processedSubtasks: TaskWithDates[] = []
+
+          // Aplicar margem de início
+          const marginStart = task.margin_start || 0
+          const marginEnd = task.margin_end || 0
+
           let subtaskCurrentDate = new Date(startDate)
+          subtaskCurrentDate.setDate(subtaskCurrentDate.getDate() + Math.ceil(marginStart))
 
           subtasks.forEach(subtask => {
             const subtaskStart = new Date(subtaskCurrentDate)
@@ -197,13 +258,21 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
             subtaskCurrentDate.setDate(subtaskCurrentDate.getDate() + 1)
           })
 
-          // Calcular intervalo real da tarefa pai baseado nas subtarefas
+          // Calcular intervalo real da tarefa pai baseado nas subtarefas + margens
           const firstSubtaskStart = processedSubtasks[0].start_date
           const lastSubtaskEnd = processedSubtasks[processedSubtasks.length - 1].end_date
 
-          // Duração = diferença entre primeiro início e último fim (incluindo gaps se houver)
-          taskDuration = Math.floor((lastSubtaskEnd.getTime() - firstSubtaskStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
-          endDate = lastSubtaskEnd
+          // Data de início da tarefa = início da primeira subtarefa - margem
+          const taskStartWithMargin = new Date(firstSubtaskStart)
+          taskStartWithMargin.setDate(taskStartWithMargin.getDate() - Math.ceil(marginStart))
+
+          // Data de fim da tarefa = fim da última subtarefa + margem
+          const taskEndWithMargin = new Date(lastSubtaskEnd)
+          taskEndWithMargin.setDate(taskEndWithMargin.getDate() + Math.ceil(marginEnd))
+
+          // Duração = diferença entre primeiro início e último fim (incluindo gaps e margens)
+          taskDuration = Math.floor((taskEndWithMargin.getTime() - taskStartWithMargin.getTime()) / (1000 * 60 * 60 * 24)) + 1
+          endDate = taskEndWithMargin
 
           // Adicionar subtarefas processadas
           processedSubtasks.forEach(subtask => result.push(subtask))
@@ -269,7 +338,41 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
   }
 
   const tasksWithDates = calculateTaskDates()
-  const organizedTasks = organizeTasksHierarchy(tasksWithDates)
+
+  // ═══════════════════════════════════════════════════════════════
+  // APLICAR FILTROS
+  // ═══════════════════════════════════════════════════════════════
+  let filteredTasksWithDates = tasksWithDates.filter(t => !t.parent_id) // Apenas tarefas principais
+
+  // Filtro por tipo
+  if (filterType !== 'all') {
+    filteredTasksWithDates = filteredTasksWithDates.filter(t => t.type === filterType)
+  }
+
+  // Filtro por pessoa
+  if (filterPerson !== 'all') {
+    filteredTasksWithDates = filteredTasksWithDates.filter(t =>
+      allocations.some(a => a.task_id === t.id && a.resource_id === filterPerson)
+    )
+  }
+
+  // Filtro por progresso
+  if (filterProgress !== 'all') {
+    if (filterProgress === 'not_started') {
+      filteredTasksWithDates = filteredTasksWithDates.filter(t => t.progress === 0)
+    } else if (filterProgress === 'in_progress') {
+      filteredTasksWithDates = filteredTasksWithDates.filter(t => t.progress > 0 && t.progress < 100)
+    } else if (filterProgress === 'completed') {
+      filteredTasksWithDates = filteredTasksWithDates.filter(t => t.progress === 100)
+    }
+  }
+
+  // Incluir subtarefas das tarefas filtradas
+  const filteredTaskIds = new Set(filteredTasksWithDates.map(t => t.id))
+  const subtasksOfFiltered = tasksWithDates.filter(t => t.parent_id && filteredTaskIds.has(t.parent_id))
+  const finalFilteredTasks = [...filteredTasksWithDates, ...subtasksOfFiltered]
+
+  const organizedTasks = organizeTasksHierarchy(finalFilteredTasks)
 
   // Criar grid de datas
   const allDates = tasksWithDates.flatMap(t => [t.start_date, t.end_date])
@@ -288,12 +391,45 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
     if (dateGrid.length === 0) return {}
 
     const taskStart = task.start_date
-    const daysSinceStart = dateGrid.findIndex(date => 
+    const taskEnd = task.end_date
+
+    // Encontrar índices no grid
+    const startIndex = dateGrid.findIndex(date =>
       date.toDateString() === taskStart.toDateString()
     )
 
-    const leftPx = daysSinceStart * 50 // 50px por dia
-    const widthPx = task.duration_days * 50
+    const endIndex = dateGrid.findIndex(date =>
+      date.toDateString() === taskEnd.toDateString()
+    )
+
+    // Se não encontrar no grid, usar fallback
+    if (startIndex === -1) return {}
+
+    // Calcular posição left - aplicar offset temporário se estiver redimensionando pela esquerda
+    let leftPx = startIndex * 50 // 50px por dia
+    if (tempStartOffsets.has(task.id)) {
+      const offsetDays = tempStartOffsets.get(task.id)!
+      leftPx += offsetDays * 50
+    }
+
+    // Calcular largura: do início do dia de início até o FIM do dia de término
+    // Se endIndex foi encontrado, usar ele; senão, calcular baseado na duração
+    let widthPx: number
+    if (endIndex !== -1) {
+      // Usar duração temporária se estiver redimensionando
+      if (tempDurations.has(task.id)) {
+        widthPx = tempDurations.get(task.id)! * 50
+      } else {
+        // Do início do startIndex até o FIM do endIndex (endIndex + 1)
+        widthPx = (endIndex - startIndex + 1) * 50
+      }
+    } else {
+      // Fallback: usar duration_days
+      const displayDuration = tempDurations.has(task.id)
+        ? tempDurations.get(task.id)!
+        : task.duration_days
+      widthPx = displayDuration * 50
+    }
 
     return {
       left: `${leftPx}px`,
@@ -301,10 +437,47 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
     }
   }
 
+  // Função para detectar se subtarefa está em atraso (fora da margem da tarefa principal)
+  const isSubtaskDelayed = (subtask: TaskWithAllocations, parentTask: TaskWithAllocations | undefined): boolean => {
+    if (!parentTask || !parentTask.subtasks || parentTask.subtasks.length === 0) return false
+
+    // Encontrar o intervalo "puro" das subtarefas (sem margem)
+    const subtasksOnly = parentTask.subtasks
+    if (subtasksOnly.length === 0) return false
+
+    const earliestSubtaskStart = subtasksOnly.reduce((earliest, sub) => {
+      return sub.start_date < earliest ? sub.start_date : earliest
+    }, subtasksOnly[0].start_date)
+
+    const latestSubtaskEnd = subtasksOnly.reduce((latest, sub) => {
+      return sub.end_date > latest ? sub.end_date : latest
+    }, subtasksOnly[0].end_date)
+
+    // Calcular o limite da tarefa principal SEM margem
+    const parentStartNoMargin = earliestSubtaskStart
+    const parentEndNoMargin = latestSubtaskEnd
+
+    // Aplicar as margens para obter os limites com folga
+    const marginStart = parentTask.margin_start || 0
+    const marginEnd = parentTask.margin_end || 0
+
+    const parentStartWithMargin = new Date(parentStartNoMargin)
+    parentStartWithMargin.setDate(parentStartWithMargin.getDate() - Math.ceil(marginStart))
+
+    const parentEndWithMargin = new Date(parentEndNoMargin)
+    parentEndWithMargin.setDate(parentEndWithMargin.getDate() + Math.ceil(marginEnd))
+
+    // Subtarefa está atrasada se estiver FORA do limite com margem
+    return subtask.start_date < parentStartWithMargin || subtask.end_date > parentEndWithMargin
+  }
+
   // Cores das tarefas
-  const getTaskColor = (type: string, isSubtask: boolean) => {
+  const getTaskColor = (type: string, isSubtask: boolean, isDelayed: boolean = false) => {
+    // Subtarefas atrasadas ficam vermelhas
+    if (isSubtask && isDelayed) return 'bg-red-600'
+
     if (isSubtask) return 'bg-gray-400'
-    
+
     const colors: Record<string, string> = {
       'projeto_mecanico': 'bg-blue-500',
       'compras_mecanica': 'bg-purple-500',
@@ -316,7 +489,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
       'montagem_eletrica': 'bg-red-500',
       'coleta': 'bg-teal-500'
     }
-    
+
     return colors[type] || 'bg-gray-500'
   }
 
@@ -382,25 +555,266 @@ async function handleReorderTasks(draggedId: string, targetId: string) {
     alert('Erro ao reordenar tarefas')
   }
 }
+
+// Função para atualizar duração da tarefa ou margem
+async function updateTaskDuration(taskId: string, newDuration: number, edge: 'start' | 'end' = 'end') {
+  // Arredondar para múltiplos de 0.125 (1 hora)
+  const roundedDuration = Math.round(newDuration / 0.125) * 0.125
+
+  // Mínimo de 0.125 (1 hora)
+  const finalDuration = Math.max(0.125, roundedDuration)
+
+  try {
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return
+
+    const subtasks = tasks.filter(t => t.parent_id === taskId)
+    const hasSubtasks = subtasks.length > 0
+
+    if (hasSubtasks) {
+      // Tarefa com subtarefas: ajustar margens ao invés de duração
+      // IMPORTANTE: Usar duração calculada (tasksWithDates) ao invés de task.duration do banco
+      const taskWithDates = tasksWithDates.find(t => t.id === taskId)
+      if (!taskWithDates) return
+
+      const currentDuration = taskWithDates.duration_days
+      const deltaDuration = finalDuration - currentDuration
+
+      if (edge === 'end') {
+        // Alça direita: ajustar margin_end
+        const newMarginEnd = (task.margin_end || 0) + deltaDuration
+        const { error } = await supabase
+          .from('tasks')
+          .update({ margin_end: Math.max(0, newMarginEnd) })
+          .eq('id', taskId)
+
+        if (error) throw error
+      } else {
+        // Alça esquerda: ajustar margin_start
+        const newMarginStart = (task.margin_start || 0) + deltaDuration
+        const { error } = await supabase
+          .from('tasks')
+          .update({ margin_start: Math.max(0, newMarginStart) })
+          .eq('id', taskId)
+
+        if (error) throw error
+      }
+    } else {
+      // Tarefa sem subtarefas (ou subtarefa): ajustar duração
+      // Se a tarefa tem start_date e end_date, também precisamos atualizar as datas
+      if (task.start_date && task.end_date) {
+        const startDate = parseLocalDate(task.start_date)
+        const endDate = parseLocalDate(task.end_date)
+        if (!startDate || !endDate) return
+
+        if (edge === 'end') {
+          // Alça direita: manter start_date, alterar end_date
+          const newEndDate = new Date(startDate)
+          newEndDate.setDate(newEndDate.getDate() + Math.ceil(finalDuration) - 1)
+          const formattedEndDate = newEndDate.toISOString().split('T')[0]
+
+          const { error } = await supabase
+            .from('tasks')
+            .update({
+              duration: finalDuration,
+              end_date: formattedEndDate
+            })
+            .eq('id', taskId)
+
+          if (error) throw error
+        } else {
+          // Alça esquerda: manter end_date, alterar start_date
+          // Fórmula: newStart = endDate - Math.ceil(finalDuration) + 1
+          //
+          // Mas precisamos garantir consistência:
+          // Se duration = 11.875 dias (11 dias + 7 horas)
+          // Devemos usar 12 dias completos no cálculo visual
+          const daysToSubtract = Math.ceil(finalDuration)
+
+          const newStartDate = new Date(endDate)
+          newStartDate.setDate(newStartDate.getDate() - daysToSubtract + 1)
+          const formattedStartDate = newStartDate.toISOString().split('T')[0]
+
+          const { error } = await supabase
+            .from('tasks')
+            .update({
+              duration: finalDuration,
+              start_date: formattedStartDate
+            })
+            .eq('id', taskId)
+
+          if (error) throw error
+        }
+      } else {
+        // Tarefa sem datas: apenas atualizar duration
+        const { error } = await supabase
+          .from('tasks')
+          .update({ duration: finalDuration })
+          .eq('id', taskId)
+
+        if (error) throw error
+      }
+    }
+
+    onRefresh()
+  } catch (error) {
+    console.error('Erro ao atualizar duração:', error)
+    alert('Erro ao atualizar duração')
+  }
+}
+
+// Handler para resize - quando começa o arrasto
+function handleResizeStart(taskId: string, edge: 'start' | 'end', e: React.MouseEvent) {
+  e.stopPropagation()
+  e.preventDefault()
+
+  const target = e.currentTarget.parentElement as HTMLElement
+  const rect = target.getBoundingClientRect()
+
+  setResizingTask({
+    taskId,
+    edge,
+    startX: e.clientX,
+    startWidth: rect.width,
+    startLeft: rect.left
+  })
+}
+
+// useEffect para lidar com mousemove e mouseup globalmente
+useEffect(() => {
+  if (!resizingTask) {
+    document.body.classList.remove('resizing')
+    return
+  }
+
+  // Adicionar classe para desabilitar seleção de texto
+  document.body.classList.add('resizing')
+
+  const handleMouseMove = (e: MouseEvent) => {
+    e.preventDefault()
+    if (!resizingTask) return
+
+    const deltaX = e.clientX - resizingTask.startX
+    const pixelsPerDay = 50 // 50px = 1 dia
+    const deltaDays = deltaX / pixelsPerDay
+
+    // Calcular nova duração baseado na borda sendo arrastada
+    // IMPORTANTE: Usar tasksWithDates (com duration_days calculada) ao invés de tasks (do banco)
+    const task = tasksWithDates.find(t => t.id === resizingTask.taskId)
+    if (!task) return
+
+    if (resizingTask.edge === 'end') {
+      // Arrastando borda direita - aumenta/diminui duração mantendo início fixo
+      const newDuration = Math.max(0.125, task.duration_days + deltaDays)
+      const roundedDuration = Math.round(newDuration / 0.125) * 0.125
+
+      // Atualizar visualmente com duração temporária
+      setTempDurations(prev => {
+        const newMap = new Map(prev)
+        newMap.set(resizingTask.taskId, roundedDuration)
+        return newMap
+      })
+
+      // Limpar offset de início (se houver)
+      setTempStartOffsets(prev => {
+        const newMap = new Map(prev)
+        newMap.delete(resizingTask.taskId)
+        return newMap
+      })
+    } else {
+      // Arrastando borda esquerda - move a data de início, mantém data de fim fixa
+      // Se arrastar para DIREITA (+deltaDays), a duração DIMINUI
+      // Se arrastar para ESQUERDA (-deltaDays), a duração AUMENTA
+      const newDuration = Math.max(0.125, task.duration_days - deltaDays)
+      const roundedDuration = Math.round(newDuration / 0.125) * 0.125
+
+      // Atualizar duração
+      setTempDurations(prev => {
+        const newMap = new Map(prev)
+        newMap.set(resizingTask.taskId, roundedDuration)
+        return newMap
+      })
+
+      // Atualizar offset da posição inicial
+      // IMPORTANTE: O offset visual é o deltaDays (movimento do mouse)
+      // Mas precisamos ajustar pelo arredondamento da duração
+      const durationChange = roundedDuration - task.duration_days
+      const visualOffset = -durationChange // Inverter porque diminuir duração = mover para direita
+
+      setTempStartOffsets(prev => {
+        const newMap = new Map(prev)
+        newMap.set(resizingTask.taskId, visualOffset)
+        return newMap
+      })
+    }
+  }
+
+  const handleMouseUp = async (e: MouseEvent) => {
+    e.preventDefault()
+    if (!resizingTask) return
+
+    document.body.classList.remove('resizing')
+
+    const deltaX = e.clientX - resizingTask.startX
+    const pixelsPerDay = 50
+    const deltaDays = deltaX / pixelsPerDay
+
+    // Buscar tarefa com duração calculada
+    const taskWithDates = tasksWithDates.find(t => t.id === resizingTask.taskId)
+    const taskFromDB = tasks.find(t => t.id === resizingTask.taskId)
+
+    if (!taskWithDates || !taskFromDB) {
+      setResizingTask(null)
+      setTempDurations(new Map())
+      return
+    }
+
+    let newDuration: number
+
+    if (resizingTask.edge === 'end' || resizingTask.edge === 'start') {
+      // Usar duration_days (calculada visualmente) ao invés de duration (do banco)
+      if (resizingTask.edge === 'end') {
+        // Alça direita: adicionar o delta
+        newDuration = Math.max(0.125, taskWithDates.duration_days + deltaDays)
+      } else {
+        // Alça esquerda: subtrair o delta (arrastar direita diminui duração)
+        newDuration = Math.max(0.125, taskWithDates.duration_days - deltaDays)
+      }
+
+      newDuration = Math.round(newDuration / 0.125) * 0.125
+
+      // Salvar no banco (passa o edge para saber se é margem inicial ou final)
+      await updateTaskDuration(taskFromDB.id, newDuration, resizingTask.edge)
+    }
+
+    // Limpar estados temporários
+    setTempDurations(new Map())
+    setTempStartOffsets(new Map())
+    setResizingTask(null)
+  }
+
+  document.addEventListener('mousemove', handleMouseMove)
+  document.addEventListener('mouseup', handleMouseUp)
+
+  return () => {
+    document.body.classList.remove('resizing')
+    document.removeEventListener('mousemove', handleMouseMove)
+    document.removeEventListener('mouseup', handleMouseUp)
+  }
+}, [resizingTask, tasks])
   // Renderizar tarefas recursivamente
-  const renderTask = (task: TaskWithAllocations, level = 0) => {
+  const renderTask = (task: TaskWithAllocations, level = 0, parentTask?: TaskWithAllocations) => {
     const isSubtask = level > 0
     const hasSubtasks = (task.subtasks?.length || 0) > 0
     const isExpanded = task.isExpanded
+    const isDelayed = isSubtask ? isSubtaskDelayed(task, parentTask) : false
 
     const taskElement = (
-      <div 
-  key={task.id} 
+      <div
+  key={task.id}
   className={`flex border-b hover:bg-gray-50 transition-colors ${
-    draggedTask === task.id ? 'opacity-50' : ''
-  } ${dragOverTask === task.id ? 'border-blue-500 border-2' : ''}`}
-  draggable={!isSubtask} // Só tarefas principais podem ser arrastadas
-  onDragStart={(e) => {
-    if (!isSubtask) {
-      setDraggedTask(task.id)
-      e.dataTransfer.effectAllowed = 'move'
-    }
-  }}
+    draggedTask === task.id ? 'dragging-row' : ''
+  } ${dragOverTask === task.id ? 'drag-over-row' : ''}`}
   onDragOver={(e) => {
     if (!isSubtask && draggedTask && draggedTask !== task.id) {
       e.preventDefault()
@@ -419,17 +833,31 @@ async function handleReorderTasks(draggedId: string, targetId: string) {
     setDraggedTask(null)
     setDragOverTask(null)
   }}
-  onDragEnd={() => {
-    setDraggedTask(null)
-    setDragOverTask(null)
-  }}
 >
   {/* Coluna de nome da tarefa */}
-  <div 
+  <div
     className="w-80 px-4 py-3 border-r flex items-center justify-between"
     style={{ paddingLeft: `${level * 24 + 16}px` }}
   >
           <div className="flex items-center space-x-2 flex-1 min-w-0">
+            {/* Alça de arrasto (drag handle) - apenas para tarefas principais */}
+            {!isSubtask && (
+              <div
+                draggable
+                onDragStart={(e) => {
+                  setDraggedTask(task.id)
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                onDragEnd={() => {
+                  setDraggedTask(null)
+                  setDragOverTask(null)
+                }}
+                className="drag-handle flex-shrink-0 w-5 h-5 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded"
+                title="Arrastar para reordenar"
+              >
+                ⋮⋮
+              </div>
+            )}
             {hasSubtasks && (
               <button
                 onClick={() => toggleTaskExpansion(task.id)}
@@ -528,18 +956,80 @@ async function handleReorderTasks(draggedId: string, targetId: string) {
 
           {/* Barra da tarefa */}
           <div
-            className={`absolute top-1/2 transform -translate-y-1/2 h-8 rounded shadow-sm ${getTaskColor(task.type, isSubtask)} ${
+            className={`absolute top-1/2 transform -translate-y-1/2 h-8 rounded shadow-sm ${getTaskColor(task.type, isSubtask, isDelayed)} ${
               isSubtask ? 'opacity-70' : 'opacity-90'
-            } ${selectedTask === task.id ? 'ring-2 ring-blue-500' : ''} hover:opacity-100 cursor-pointer flex items-center justify-center transition-all`}
+            } ${selectedTask === task.id ? 'ring-2 ring-blue-500' : ''} ${
+              isDelayed ? 'ring-2 ring-red-600' : ''
+            } hover:opacity-100 cursor-pointer flex items-center group ${
+              resizingTask?.taskId === task.id ? 'task-bar-resizing' : 'task-bar-normal'
+            }`}
             style={{
               ...getTaskBarStyle(task),
               minWidth: '40px'
             }}
             onClick={() => setSelectedTask(task.id)}
           >
-            <span className="text-white text-xs font-semibold px-2 truncate">
-              {task.duration_days}d
-            </span>
+            {/* Alça de resize ESQUERDA (início) */}
+            <div
+              className="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize bg-white bg-opacity-0 group-hover:bg-opacity-30 hover:bg-opacity-50 transition-all z-10"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => handleResizeStart(task.id, 'start', e)}
+              title="Arrastar para alterar data de início"
+            >
+              <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-1 h-4 bg-white rounded-r opacity-0 group-hover:opacity-100" />
+            </div>
+
+            {/* Conteúdo da barra (duração) */}
+            <div className="flex items-center justify-center h-full px-2 gap-1 flex-1 pointer-events-none">
+              <span className="text-white text-xs font-semibold truncate">
+                {tempDurations.has(task.id)
+                  ? `${Math.ceil(tempDurations.get(task.id)!)}d`
+                  : `${task.duration_days}d`
+                }
+              </span>
+              {isDelayed && (
+                <span className="text-white text-[10px] font-bold bg-red-800 px-1 rounded">
+                  ATRASO
+                </span>
+              )}
+            </div>
+
+            {/* Indicador de resize em tempo real */}
+            {tempDurations.has(task.id) && resizingTask?.taskId === task.id && (
+              <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-2 py-1 rounded shadow-lg text-xs font-semibold whitespace-nowrap z-20">
+                {tempDurations.get(task.id)!.toFixed(3)} dias
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-blue-600"></div>
+              </div>
+            )}
+
+            {/* Alça de resize DIREITA (fim) */}
+            <div
+              className="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize bg-white bg-opacity-0 group-hover:bg-opacity-30 hover:bg-opacity-50 transition-all z-10"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => handleResizeStart(task.id, 'end', e)}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                const newDuration = prompt(
+                  `Duração atual: ${task.duration} dias\n\n` +
+                  `Digite a nova duração em dias:\n` +
+                  `- 1 dia = 8 horas\n` +
+                  `- 0.5 = 4 horas\n` +
+                  `- 0.25 = 2 horas\n` +
+                  `- 0.125 = 1 hora`,
+                  task.duration.toString()
+                )
+
+                if (newDuration) {
+                  const parsed = parseFloat(newDuration)
+                  if (!isNaN(parsed) && parsed > 0) {
+                    updateTaskDuration(task.id, parsed)
+                  }
+                }
+              }}
+              title="Arrastar para redimensionar | Duplo clique para editar"
+            >
+              <div className="absolute right-0 top-1/2 transform -translate-y-1/2 w-1 h-4 bg-white rounded-l opacity-0 group-hover:opacity-100" />
+            </div>
           </div>
         </div>
       </div>
@@ -550,7 +1040,7 @@ async function handleReorderTasks(draggedId: string, targetId: string) {
       return (
         <div key={task.id}>
           {taskElement}
-          {task.subtasks?.map(subtask => renderTask(subtask, level + 1))}
+          {task.subtasks?.map(subtask => renderTask(subtask, level + 1, task))}
         </div>
       )
     }
@@ -577,6 +1067,84 @@ async function handleReorderTasks(draggedId: string, targetId: string) {
             >
               🔄 Atualizar
             </button>
+          </div>
+        </div>
+
+        {/* Barra de filtros */}
+        <div className="bg-white border-b p-4">
+          <div className="flex items-center gap-4">
+            {/* Filtro por Tipo */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">Tipo:</label>
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+                className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-900 bg-white"
+              >
+                <option value="all">Todos</option>
+                <option value="projeto_mecanico">Projeto Mecânico</option>
+                <option value="compras_mecanica">Compras Mecânica</option>
+                <option value="projeto_eletrico">Projeto Elétrico</option>
+                <option value="compras_eletrica">Compras Elétrica</option>
+                <option value="fabricacao">Fabricação</option>
+                <option value="tratamento_superficial">Tratamento Superficial</option>
+                <option value="montagem_mecanica">Montagem Mecânica</option>
+                <option value="montagem_eletrica">Montagem Elétrica</option>
+                <option value="coleta">Coleta</option>
+              </select>
+            </div>
+
+            {/* Filtro por Pessoa */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">Pessoa:</label>
+              <select
+                value={filterPerson}
+                onChange={(e) => setFilterPerson(e.target.value)}
+                className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-900 bg-white"
+              >
+                <option value="all">Todas</option>
+                {resources.map(resource => (
+                  <option key={resource.id} value={resource.id}>
+                    {resource.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Filtro por Progresso */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">Status:</label>
+              <select
+                value={filterProgress}
+                onChange={(e) => setFilterProgress(e.target.value)}
+                className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-900 bg-white"
+              >
+                <option value="all">Todos</option>
+                <option value="not_started">Não iniciado (0%)</option>
+                <option value="in_progress">Em andamento (1-99%)</option>
+                <option value="completed">Concluído (100%)</option>
+              </select>
+            </div>
+
+            {/* Contador e limpar */}
+            <div className="ml-auto flex items-center gap-4">
+              <span className="text-sm text-gray-600">
+                {organizedTasks.length} tarefa(s)
+              </span>
+
+              {(filterType !== 'all' || filterPerson !== 'all' || filterProgress !== 'all') && (
+                <button
+                  onClick={() => {
+                    setFilterType('all')
+                    setFilterPerson('all')
+                    setFilterProgress('all')
+                  }}
+                  className="text-sm text-blue-600 hover:text-blue-700 underline"
+                >
+                  Limpar filtros
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

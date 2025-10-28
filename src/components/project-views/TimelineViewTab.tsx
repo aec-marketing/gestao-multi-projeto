@@ -58,7 +58,10 @@ export default function TimelineViewTab({
   
       // ADICIONE ESTE STATE:
   const [hoveredTask, setHoveredTask] = useState<string | null>(null)
-
+// ADICIONE ESTES STATES:
+const [filterType, setFilterType] = useState<string>('all')
+const [filterPerson, setFilterPerson] = useState<string>('all')
+const [filterProgress, setFilterProgress] = useState<string>('all')
   // Função para gerar grid de meses
   function generateMonthGrid() {
     if (!project?.start_date || tasks.length === 0) return []
@@ -164,11 +167,31 @@ function getTaskBarStyle(task: Task) {
 }
 
   const months = generateMonthGrid()
-  const days = generateDayGrid()  // ← ADICIONE ESTA LINHA
-
+  const days = generateDayGrid()
 
   // Pegar apenas tarefas principais
-  const mainTasks = tasks.filter(t => !t.parent_id)
+  let mainTasks = tasks.filter(t => !t.parent_id)
+
+  // Aplicar filtros
+  if (filterType !== 'all') {
+    mainTasks = mainTasks.filter(t => t.type === filterType)
+  }
+
+  if (filterPerson !== 'all') {
+    mainTasks = mainTasks.filter(t =>
+      allocations.some(a => a.task_id === t.id && a.resource_id === filterPerson)
+    )
+  }
+
+  if (filterProgress !== 'all') {
+    if (filterProgress === 'not_started') {
+      mainTasks = mainTasks.filter(t => t.progress === 0)
+    } else if (filterProgress === 'in_progress') {
+      mainTasks = mainTasks.filter(t => t.progress > 0 && t.progress < 100)
+    } else if (filterProgress === 'completed') {
+      mainTasks = mainTasks.filter(t => t.progress === 100)
+    }
+  }
 
   return (
     <>
@@ -176,12 +199,84 @@ function getTaskBarStyle(task: Task) {
 
       <div className="bg-white rounded-lg border overflow-hidden">
       {/* Header */}
-      <div className="p-6 border-b bg-gray-50">
-        <h2 className="text-lg font-semibold text-gray-900">Timeline do Projeto</h2>
-        <p className="text-sm text-gray-600">
-          Visão macro • {mainTasks.length} tarefas principais • {months.length} meses
-        </p>
-      </div>
+<div className="p-6 border-b bg-gray-50 space-y-4">
+  <div>
+    <h2 className="text-lg font-semibold text-gray-900">Timeline do Projeto</h2>
+    <p className="text-sm text-gray-600">
+      Visão macro • {mainTasks.length} tarefas principais • {months.length} meses
+    </p>
+  </div>
+  
+  {/* Barra de filtros */}
+  <div className="flex items-center gap-4 bg-white p-4 rounded-lg border">
+    {/* Filtro por Tipo */}
+    <div className="flex items-center gap-2">
+      <label className="text-sm font-medium text-gray-700">Tipo:</label>
+      <select
+        value={filterType}
+        onChange={(e) => setFilterType(e.target.value)}
+        className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-900 bg-white"
+      >
+        <option value="all">Todos</option>
+        <option value="projeto_mecanico">Projeto Mecânico</option>
+        <option value="compras_mecanica">Compras Mecânica</option>
+        <option value="projeto_eletrico">Projeto Elétrico</option>
+        <option value="compras_eletrica">Compras Elétrica</option>
+        <option value="fabricacao">Fabricação</option>
+        <option value="tratamento_superficial">Tratamento Superficial</option>
+        <option value="montagem_mecanica">Montagem Mecânica</option>
+        <option value="montagem_eletrica">Montagem Elétrica</option>
+        <option value="coleta">Coleta</option>
+      </select>
+    </div>
+    
+    {/* Filtro por Pessoa */}
+    <div className="flex items-center gap-2">
+      <label className="text-sm font-medium text-gray-700">Pessoa:</label>
+      <select
+        value={filterPerson}
+        onChange={(e) => setFilterPerson(e.target.value)}
+        className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-900 bg-white"
+      >
+        <option value="all">Todas</option>
+        {resources.map(resource => (
+          <option key={resource.id} value={resource.id}>
+            {resource.name}
+          </option>
+        ))}
+      </select>
+    </div>
+    
+    {/* Filtro por Progresso */}
+    <div className="flex items-center gap-2">
+      <label className="text-sm font-medium text-gray-700">Status:</label>
+      <select
+        value={filterProgress}
+        onChange={(e) => setFilterProgress(e.target.value)}
+        className="border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-900 bg-white"
+      >
+        <option value="all">Todos</option>
+        <option value="not_started">Não iniciado (0%)</option>
+        <option value="in_progress">Em andamento (1-99%)</option>
+        <option value="completed">Concluído (100%)</option>
+      </select>
+    </div>
+    
+    {/* Botão limpar filtros */}
+    {(filterType !== 'all' || filterPerson !== 'all' || filterProgress !== 'all') && (
+      <button
+        onClick={() => {
+          setFilterType('all')
+          setFilterPerson('all')
+          setFilterProgress('all')
+        }}
+        className="ml-auto text-sm text-blue-600 hover:text-blue-700 underline"
+      >
+        Limpar filtros
+      </button>
+    )}
+  </div>
+</div>
 
 {/* Timeline Grid */}
 <div className="overflow-x-auto max-h-[calc(100vh-300px)] overflow-y-auto">

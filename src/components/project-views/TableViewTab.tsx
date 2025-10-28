@@ -88,6 +88,50 @@ const [newSubtaskData, setNewSubtaskData] = useState({
   name: '',
   duration: 1
 })
+
+// ADICIONE ESTES STATES:
+const [searchTerm, setSearchTerm] = useState('')
+const [sortBy, setSortBy] = useState<'name' | 'type' | 'duration' | 'progress'>('name')
+const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+// Função para ordenar tarefas
+function sortTasks(tasksToSort: Task[]) {
+  return [...tasksToSort].sort((a, b) => {
+    let comparison = 0
+    
+    switch (sortBy) {
+      case 'name':
+        comparison = a.name.localeCompare(b.name)
+        break
+      case 'type':
+        comparison = a.type.localeCompare(b.type)
+        break
+      case 'duration':
+        comparison = a.duration - b.duration
+        break
+      case 'progress':
+        comparison = a.progress - b.progress
+        break
+    }
+    
+    return sortOrder === 'asc' ? comparison : -comparison
+  })
+}
+
+// Função para filtrar tarefas
+function filterTasks(tasksToFilter: Task[]) {
+  if (!searchTerm.trim()) return tasksToFilter
+  
+  const term = searchTerm.toLowerCase()
+  return tasksToFilter.filter(task => 
+    task.name.toLowerCase().includes(term) ||
+    task.type.toLowerCase().includes(term)
+  )
+}
+
+// Aplicar filtro e ordenação
+const mainTasks = sortTasks(
+  filterTasks(tasks.filter(t => !t.parent_id))
+)
 // ADICIONE ESTA FUNÇÃO:
 async function updateTask(taskId: string, field: string, value: string | number) {
   try {
@@ -243,12 +287,59 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
 
   return (
     <div className="bg-white rounded-lg border overflow-hidden">
-      <div className="p-6 border-b">
-        <h2 className="text-lg font-semibold text-gray-900">Modo Planilha</h2>
-        <p className="text-sm text-gray-600">
-          Clique duplo para editar • Enter para salvar • Esc para cancelar
-        </p>
+  <div className="p-6 border-b space-y-4">
+    <div>
+      <h2 className="text-lg font-semibold text-gray-900">Modo Planilha</h2>
+      <p className="text-sm text-gray-600">
+        Clique duplo para editar • Enter para salvar • Esc para cancelar
+      </p>
+    </div>
+    
+    {/* Barra de busca e filtros */}
+    <div className="flex items-center gap-4">
+      {/* Campo de busca */}
+      <div className="flex-1">
+        <input
+          type="text"
+          placeholder="🔍 Buscar por nome ou tipo..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full border border-gray-300 rounded-lg px-4 py-2 text-sm text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
       </div>
+      
+      {/* Ordenar por */}
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-600">Ordenar:</label>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as any)}
+          className="border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 bg-white"
+        >
+          <option value="name">Nome</option>
+          <option value="type">Tipo</option>
+          <option value="duration">Duração</option>
+          <option value="progress">Progresso</option>
+        </select>
+        
+        {/* Botão de ordem */}
+        <button
+          onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+          className="p-2 border border-red-300 rounded hover:bg-red-500 bg-gray-800"
+          title={sortOrder === 'asc' ? 'Crescente' : 'Decrescente'}
+        >
+          {sortOrder === 'asc' ? '↑' : '↓'}
+        </button>
+      </div>
+      
+      {/* Contador de resultados */}
+      {searchTerm && (
+        <div className="text-sm text-gray-600">
+          {mainTasks.length} resultado(s)
+        </div>
+      )}
+    </div>
+  </div>
 
       <div className="overflow-x-auto">
         <table className="w-full">
@@ -287,7 +378,8 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {tasks.filter(t => !t.parent_id).map((task) => {
+            {mainTasks.map((task) => {
+
               const taskAllocations = allocations.filter(a => a.task_id === task.id)
               const subtasks = tasks.filter(t => t.parent_id === task.id)
               const totalEstimatedCost = subtasks.reduce((sum, sub) => sum + (sub.estimated_cost || 0), 0)

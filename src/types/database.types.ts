@@ -102,6 +102,8 @@ export type Database = {
           sort_order: number
           estimated_cost: number
           actual_cost: number
+          margin_start: number
+          margin_end: number
           created_at: string
           updated_at: string
         }
@@ -121,6 +123,8 @@ export type Database = {
           sort_order?: number
           estimated_cost?: number
           actual_cost?: number
+          margin_start?: number
+          margin_end?: number
         }
         Update: {
           id?: string
@@ -138,6 +142,8 @@ export type Database = {
           sort_order?: number
           estimated_cost?: number
           actual_cost?: number
+          margin_start?: number
+          margin_end?: number
         }
       }
     }
