@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Project, Resource } from '@/types/database.types'
 import GanttView from '@/components/GanttView'
+import { formatDateBR } from '@/utils/date.utils'
+import Link from 'next/link'
 
 interface ProjectListProps {
   projects: Project[]
@@ -57,12 +59,8 @@ export default function ProjectList({ projects, resources }: ProjectListProps) {
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Não definido'
-    try {
-      const date = new Date(dateString)
-      return date.toLocaleDateString('pt-BR')
-    } catch {
-      return 'Data inválida'
-    }
+    const formatted = formatDateBR(dateString)
+    return formatted || 'Data inválida'
   }
 
   if (projects.length === 0) {
@@ -123,12 +121,21 @@ export default function ProjectList({ projects, resources }: ProjectListProps) {
               </div>
 
               <div className="flex flex-col space-y-2 ml-4">
+                {/* Modal Gantt (antigo) */}
                 <button 
                   onClick={() => setSelectedProjectForGantt(project.id)}
-                  className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                  className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
                 >
-                  📊 Gantt
+                  📊 Gantt (Modal)
                 </button>
+                
+                {/* Página Dedicada (NOVO!) */}
+                <Link href={`/projeto/${project.id}`}>
+                  <button className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors w-full">
+                    🚀 Abrir Página
+                  </button>
+                </Link>
+                
                 <button className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors">
                   ✏️ Editar
                 </button>

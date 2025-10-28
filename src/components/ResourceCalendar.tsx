@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Resource } from '@/types/database.types'
 import { AllocationWithDetails, PRIORITY_CONFIG } from '@/types/allocation.types'
+import { parseLocalDate } from '@/utils/date.utils'
 
 interface ResourceCalendarProps {
   onClose: () => void
@@ -81,14 +82,15 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
       .map(allocation => ({
         id: allocation.id,
         title: allocation.task.name,
-        startDate: new Date(allocation.start_date!),
-        endDate: new Date(allocation.end_date!),
+        startDate: parseLocalDate(allocation.start_date!)!,
+        endDate: parseLocalDate(allocation.end_date!)!,
         priority: allocation.priority,
         resourceId: allocation.resource_id,
         resourceName: allocation.resource.name,
         projectName: allocation.task.project.name,
         taskType: allocation.task.type
       }))
+      .filter(event => event.startDate && event.endDate)
 
     setEvents(calendarEvents)
   }

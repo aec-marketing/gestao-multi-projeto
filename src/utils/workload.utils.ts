@@ -5,6 +5,7 @@ import {
   AlertThresholds,
   DEFAULT_THRESHOLDS
 } from '@/types/allocation.types'
+import { parseLocalDate } from './date.utils'
 
 // Calcular análise de carga de trabalho para um recurso
 export function calculateWorkloadAnalysis(
@@ -64,8 +65,9 @@ function calculateWeeklyHours(allocations: AllocationWithDetails[]): number {
   
   allocations.forEach(allocation => {
     if (allocation.start_date && allocation.end_date) {
-      const startDate = new Date(allocation.start_date)
-      const endDate = new Date(allocation.end_date)
+      const startDate = parseLocalDate(allocation.start_date)
+      const endDate = parseLocalDate(allocation.end_date)
+      if (!startDate || !endDate) return
       const durationInDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
       const weeks = Math.max(1, Math.ceil(durationInDays / 7))
       
@@ -206,10 +208,12 @@ function findOverlappingTasks(tasks: AllocationWithDetails[]): AllocationWithDet
       const task2 = tasks[j]
       
       if (task1.start_date && task1.end_date && task2.start_date && task2.end_date) {
-        const start1 = new Date(task1.start_date)
-        const end1 = new Date(task1.end_date)
-        const start2 = new Date(task2.start_date)
-        const end2 = new Date(task2.end_date)
+        const start1 = parseLocalDate(task1.start_date)
+        const end1 = parseLocalDate(task1.end_date)
+        const start2 = parseLocalDate(task2.start_date)
+        const end2 = parseLocalDate(task2.end_date)
+
+        if (!start1 || !end1 || !start2 || !end2) continue
         
         // Verificar sobreposição
         if (start1 <= end2 && start2 <= end1) {

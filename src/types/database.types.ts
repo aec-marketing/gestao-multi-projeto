@@ -17,6 +17,8 @@ export type Database = {
           end_date: string | null
           is_active: boolean
           notes: string | null
+              estimated_cost: number        // ← ADICIONE
+    actual_cost: number           // ← ADICIONE
           created_at: string
           updated_at: string
         }
@@ -34,6 +36,8 @@ export type Database = {
           end_date?: string | null
           is_active?: boolean
           notes?: string | null
+              estimated_cost?: number       // ← ADICIONE
+    actual_cost?: number          // ← ADICIONE
         }
         Update: {
           id?: string
@@ -49,6 +53,8 @@ export type Database = {
           end_date?: string | null
           is_active?: boolean
           notes?: string | null
+              estimated_cost?: number       // ← ADICIONE
+    actual_cost?: number          // ← ADICIONE
         }
       }
       resources: {
@@ -94,6 +100,8 @@ export type Database = {
           progress: number
           notes: string | null
           sort_order: number
+          estimated_cost: number
+          actual_cost: number
           created_at: string
           updated_at: string
         }
@@ -111,6 +119,8 @@ export type Database = {
           progress?: number
           notes?: string | null
           sort_order?: number
+          estimated_cost?: number
+          actual_cost?: number
         }
         Update: {
           id?: string
@@ -126,6 +136,8 @@ export type Database = {
           progress?: number
           notes?: string | null
           sort_order?: number
+          estimated_cost?: number
+          actual_cost?: number
         }
       }
     }
