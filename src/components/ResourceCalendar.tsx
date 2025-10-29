@@ -5,6 +5,14 @@ import { supabase } from '@/lib/supabase'
 import { Resource } from '@/types/database.types'
 import { AllocationWithDetails, PRIORITY_CONFIG } from '@/types/allocation.types'
 import { parseLocalDate } from '@/utils/date.utils'
+import {
+  PersonalEvent,
+  PersonalEventWithResource,
+  doesEventBlockDate
+} from '@/types/personal-events.types'
+import PersonalEventModal from '@/components/modals/PersonalEventModal'
+import PersonalEventBadge from '@/components/calendar/PersonalEventBadge'
+import ConflictIndicator from '@/components/calendar/ConflictIndicator'
 
 interface ResourceCalendarProps {
   onClose: () => void
@@ -30,6 +38,13 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [selectedResource, setSelectedResource] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+
+  // Estados para eventos pessoais
+  const [personalEvents, setPersonalEvents] = useState<PersonalEventWithResource[]>([])
+  const [showEventModal, setShowEventModal] = useState(false)
+  const [selectedDateForEvent, setSelectedDateForEvent] = useState<Date | null>(null)
+  const [selectedResourceForEvent, setSelectedResourceForEvent] = useState<string | null>(null)
+  const [editingEvent, setEditingEvent] = useState<PersonalEvent | null>(null)
 
   useEffect(() => {
     loadData()
@@ -65,10 +80,31 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
 
       setResources(resourcesData || [])
       setAllocations(allocationsData || [])
+
+      // Carregar eventos pessoais
+      await fetchPersonalEvents()
     } catch (error) {
       console.error('Erro ao carregar dados:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function fetchPersonalEvents() {
+    try {
+      const { data, error } = await supabase
+        .from('personal_events')
+        .select(`
+          *,
+          resource:resources(*)
+        `)
+        .order('start_date', { ascending: true })
+
+      if (error) throw error
+
+      setPersonalEvents(data || [])
+    } catch (error) {
+      console.error('Erro ao buscar eventos pessoais:', error)
     }
   }
 
@@ -131,13 +167,53 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
     return events.filter(event => {
       const eventStart = new Date(event.startDate)
       const eventEnd = new Date(event.endDate)
-      
+
       // Normalizar datas para comparação (apenas dia)
       const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate())
       const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59)
-      
+
       return eventStart <= dayEnd && eventEnd >= dayStart
     })
+  }
+
+  function getPersonalEventsForDay(date: Date, resourceId?: string): PersonalEventWithResource[] {
+    return personalEvents.filter(event => {
+      if (resourceId && event.resource_id !== resourceId) return false
+
+      const eventStart = parseLocalDate(event.start_date)
+      const eventEnd = parseLocalDate(event.end_date)
+
+      if (!eventStart || !eventEnd) return false
+
+      const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+      const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59)
+
+      return eventStart <= dayEnd && eventEnd >= dayStart
+    })
+  }
+
+  function hasConflict(date: Date, resourceId: string): boolean {
+    const dayEvents = getEventsForDay(date).filter(e => e.resourceId === resourceId)
+    const personalEventsOnDay = getPersonalEventsForDay(date, resourceId)
+    const hasBlockingEvent = personalEventsOnDay.some(e => e.blocks_work)
+
+    return dayEvents.length > 0 && hasBlockingEvent
+  }
+
+  function handleDayClick(date: Date, resourceId?: string) {
+    setSelectedDateForEvent(date)
+    setSelectedResourceForEvent(resourceId || null)
+    setEditingEvent(null)
+    setShowEventModal(true)
+  }
+
+  function handleEventClick(event: PersonalEvent) {
+    setEditingEvent(event)
+    setShowEventModal(true)
+  }
+
+  function handleEventSuccess() {
+    fetchPersonalEvents()
   }
 
   function navigatePeriod(direction: 'prev' | 'next') {
@@ -244,21 +320,52 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
               </div>
             </div>
 
-            {/* Filtro por recurso */}
-            <div className="flex items-center space-x-2">
-              <label className="text-sm font-medium text-gray-700">Recurso:</label>
-              <select
-                value={selectedResource || ''}
-                onChange={(e) => setSelectedResource(e.target.value || null)}
-                className="px-3 py-1 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white"
+            {/* Filtro por recurso e botão de adicionar ausência */}
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium text-gray-700">Recurso:</label>
+                <select
+                  value={selectedResource || ''}
+                  onChange={(e) => setSelectedResource(e.target.value || null)}
+                  className="px-3 py-1 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white"
+                >
+                  <option value="">Todos os recursos</option>
+                  {resources.map(resource => (
+                    <option key={resource.id} value={resource.id}>
+                      {resource.name} ({resource.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                onClick={() => {
+                  setSelectedDateForEvent(new Date())
+                  setSelectedResourceForEvent(null)
+                  setEditingEvent(null)
+                  setShowEventModal(true)
+                }}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center space-x-2 text-sm"
               >
-                <option value="">Todos os recursos</option>
-                {resources.map(resource => (
-                  <option key={resource.id} value={resource.id}>
-                    {resource.name} ({resource.role})
-                  </option>
-                ))}
-              </select>
+                <span>+</span>
+                <span>Adicionar Ausência</span>
+              </button>
+
+              {/* Legenda */}
+              <div className="flex items-center space-x-4 text-xs border-l pl-4 ml-4">
+                <div className="flex items-center space-x-1">
+                  <div className="w-4 h-4 bg-yellow-50 border border-yellow-200 rounded"></div>
+                  <span className="text-gray-600">Ausência</span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <div className="w-4 h-4 bg-red-50 border border-red-200 rounded"></div>
+                  <span className="text-gray-600">Conflito</span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <div className="w-4 h-4 bg-blue-50 border border-blue-200 rounded"></div>
+                  <span className="text-gray-600">Alta Carga</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -266,18 +373,25 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
         {/* Calendário */}
         <div className="flex-1 overflow-auto">
           {view === 'week' ? (
-            <WeekView 
+            <WeekView
               days={calendarDays}
               resources={displayResources}
               events={events}
               getEventsForDay={getEventsForDay}
+              getPersonalEventsForDay={getPersonalEventsForDay}
+              hasConflict={hasConflict}
+              handleDayClick={handleDayClick}
+              handleEventClick={handleEventClick}
             />
           ) : (
-            <MonthView 
+            <MonthView
               days={calendarDays}
               events={events}
               getEventsForDay={getEventsForDay}
               currentDate={currentDate}
+              getPersonalEventsForDay={getPersonalEventsForDay}
+              handleDayClick={handleDayClick}
+              handleEventClick={handleEventClick}
             />
           )}
         </div>
@@ -304,21 +418,45 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
           </div>
         </div>
       </div>
+
+      {/* Modal de Eventos Pessoais */}
+      <PersonalEventModal
+        isOpen={showEventModal}
+        onClose={() => {
+          setShowEventModal(false)
+          setEditingEvent(null)
+          setSelectedDateForEvent(null)
+          setSelectedResourceForEvent(null)
+        }}
+        onSuccess={handleEventSuccess}
+        resources={resources}
+        selectedResourceId={selectedResourceForEvent || undefined}
+        selectedDate={selectedDateForEvent || undefined}
+        eventToEdit={editingEvent || undefined}
+      />
     </div>
   )
 }
 
 // Componente para visualização semanal
-function WeekView({ 
-  days, 
-  resources, 
-  events, 
-  getEventsForDay 
+function WeekView({
+  days,
+  resources,
+  events,
+  getEventsForDay,
+  getPersonalEventsForDay,
+  hasConflict,
+  handleDayClick,
+  handleEventClick
 }: {
   days: Date[]
   resources: Resource[]
   events: CalendarEvent[]
   getEventsForDay: (date: Date) => CalendarEvent[]
+  getPersonalEventsForDay: (date: Date, resourceId?: string) => PersonalEventWithResource[]
+  hasConflict: (date: Date, resourceId: string) => boolean
+  handleDayClick: (date: Date, resourceId?: string) => void
+  handleEventClick: (event: PersonalEvent) => void
 }) {
   return (
     <div className="h-full">
@@ -355,13 +493,21 @@ function WeekView({
                   const eventEnd = new Date(event.endDate)
                   const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate())
                   const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59)
-                  
+
                   return eventStart <= dayEnd && eventEnd >= dayStart
                 })
 
+                const personalEventsForDay = getPersonalEventsForDay(day, resource.id)
+                const hasConflictToday = hasConflict(day, resource.id)
+
                 return (
-                  <div key={dayIndex} className="p-1 border-r min-h-[80px] relative">
+                  <div
+                    key={dayIndex}
+                    className="p-1 border-r min-h-[80px] relative cursor-pointer hover:bg-gray-50 transition-colors"
+                    onClick={() => handleDayClick(day, resource.id)}
+                  >
                     <div className="space-y-1">
+                      {/* Eventos de Tarefas */}
                       {dayEvents.map(event => (
                         <div
                           key={event.id}
@@ -369,11 +515,32 @@ function WeekView({
                             PRIORITY_CONFIG[event.priority].color
                           }`}
                           title={`${event.title} - ${event.projectName}`}
+                          onClick={(e) => e.stopPropagation()}
                         >
                           <div className="font-medium truncate text-gray-900">{event.title}</div>
                           <div className="text-xs opacity-75 truncate text-gray-700">{event.projectName}</div>
                         </div>
                       ))}
+
+                      {/* Eventos Pessoais */}
+                      {personalEventsForDay.map(event => (
+                        <PersonalEventBadge
+                          key={event.id}
+                          event={event}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleEventClick(event)
+                          }}
+                          compact={true}
+                        />
+                      ))}
+
+                      {/* Indicador de Conflito */}
+                      <ConflictIndicator
+                        taskCount={dayEvents.length}
+                        hasBlockingEvent={personalEventsForDay.some(e => e.blocks_work)}
+                        compact={true}
+                      />
                     </div>
                   </div>
                 )
@@ -387,16 +554,22 @@ function WeekView({
 }
 
 // Componente para visualização mensal
-function MonthView({ 
-  days, 
-  events, 
-  getEventsForDay, 
-  currentDate 
+function MonthView({
+  days,
+  events,
+  getEventsForDay,
+  currentDate,
+  getPersonalEventsForDay,
+  handleDayClick,
+  handleEventClick
 }: {
   days: Date[]
   events: CalendarEvent[]
   getEventsForDay: (date: Date) => CalendarEvent[]
   currentDate: Date
+  getPersonalEventsForDay: (date: Date, resourceId?: string) => PersonalEventWithResource[]
+  handleDayClick: (date: Date, resourceId?: string) => void
+  handleEventClick: (event: PersonalEvent) => void
 }) {
   // Criar grid do mês
   const monthGrid = []
@@ -437,17 +610,38 @@ function MonthView({
           }
 
           const dayEvents = getEventsForDay(day)
+          const personalEventsForDay = getPersonalEventsForDay(day)
           const isToday = day.toDateString() === new Date().toDateString()
+          const hasBlockingEvent = personalEventsForDay.some(e => e.blocks_work)
+          const hasConflict = dayEvents.length > 0 && hasBlockingEvent
 
           return (
-            <div key={index} className="border-r border-b p-2 min-h-[120px] bg-white">
+            <div
+              key={index}
+              className="border-r border-b p-2 min-h-[120px] bg-white hover:bg-gray-50 cursor-pointer transition-colors relative"
+              onClick={() => handleDayClick(day)}
+            >
               <div className={`text-sm font-medium mb-2 ${
                 isToday ? 'text-blue-600' : 'text-gray-900'
               }`}>
                 {day.getDate()}
               </div>
-              
+
               <div className="space-y-1">
+                {/* Eventos Pessoais */}
+                {personalEventsForDay.map(event => (
+                  <PersonalEventBadge
+                    key={event.id}
+                    event={event}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleEventClick(event)
+                    }}
+                    compact={true}
+                  />
+                ))}
+
+                {/* Eventos de Tarefas */}
                 {dayEvents.slice(0, 3).map(event => (
                   <div
                     key={event.id}
@@ -460,13 +654,22 @@ function MonthView({
                     <div className="truncate text-gray-700">{event.title}</div>
                   </div>
                 ))}
-                
+
                 {dayEvents.length > 3 && (
                   <div className="text-xs text-gray-600 text-center bg-gray-100 rounded p-1">
                     +{dayEvents.length - 3} mais
                   </div>
                 )}
               </div>
+
+              {/* Indicador de Conflito */}
+              {hasConflict && (
+                <ConflictIndicator
+                  taskCount={dayEvents.length}
+                  hasBlockingEvent={hasBlockingEvent}
+                  compact={true}
+                />
+              )}
             </div>
           )
         })}

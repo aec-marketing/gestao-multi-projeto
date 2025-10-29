@@ -2,12 +2,12 @@
 
 import { supabase } from '@/lib/supabase'
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Project, Resource } from '@/types/database.types'
 import StatsCard from '@/components/StatsCard'
 import ProjectList from '@/components/ProjectList'
 import NewProjectForm from '@/components/NewProjectForm'
 import ResourceManager from '@/components/ResourceManager'
-import ResourceCalendar from '@/components/ResourceCalendar'
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -15,7 +15,6 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true)
   const [showNewProjectForm, setShowNewProjectForm] = useState(false)
   const [showResourceManager, setShowResourceManager] = useState(false)
-  const [showResourceCalendar, setShowResourceCalendar] = useState(false)
 
   useEffect(() => {
     loadDashboardData()
@@ -102,20 +101,20 @@ export default function Dashboard() {
               <span>➕</span>
               <span>Novo Projeto</span>
             </button>
-            <button 
+            <button
               onClick={() => setShowResourceManager(true)}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
             >
               <span>👥</span>
               <span>Recursos</span>
             </button>
-            <button 
-              onClick={() => setShowResourceCalendar(true)}
+            <Link
+              href="/calendario"
               className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center space-x-2"
             >
               <span>📅</span>
               <span>Calendário</span>
-            </button>
+            </Link>
             <button className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2">
               <span>📊</span>
               <span>Relatórios</span>
@@ -199,14 +198,14 @@ export default function Dashboard() {
               <div className="text-sm font-medium text-gray-700">Recursos</div>
               <div className="text-xs text-gray-500 mt-1">Gerenciar equipe</div>
             </button>
-            <button 
-              onClick={() => setShowResourceCalendar(true)}
+            <Link
+              href="/calendario"
               className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-center group"
             >
               <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">📅</div>
               <div className="text-sm font-medium text-gray-700">Calendário</div>
               <div className="text-xs text-gray-500 mt-1">Timeline de alocações</div>
-            </button>
+            </Link>
             <button className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-center group">
               <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">📋</div>
               <div className="text-sm font-medium text-gray-700">Templates</div>
@@ -241,12 +240,6 @@ export default function Dashboard() {
         />
       )}
 
-      {/* Modal do Calendário de Recursos */}
-      {showResourceCalendar && (
-        <ResourceCalendar 
-          onClose={() => setShowResourceCalendar(false)}
-        />
-      )}
     </div>
   )
 }

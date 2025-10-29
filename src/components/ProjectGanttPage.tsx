@@ -10,11 +10,12 @@ import TimelineViewTab from './project-views/TimelineViewTab'
 import FinancialViewTab from '@/components/project-views/FinancialViewTab'
 interface ProjectGanttPageProps {
   projectId: string
+  highlightTaskId?: string
 }
 
 type ViewMode = 'gantt' | 'table' | 'timeline' | 'financial'
 
-export default function ProjectGanttPage({ projectId }: ProjectGanttPageProps) {
+export default function ProjectGanttPage({ projectId, highlightTaskId }: ProjectGanttPageProps) {
   const [project, setProject] = useState<Project | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
   const [resources, setResources] = useState<Resource[]>([])
@@ -187,6 +188,7 @@ export default function ProjectGanttPage({ projectId }: ProjectGanttPageProps) {
             resources={resources}
             allocations={allocations}
             onRefresh={loadProjectData}
+            highlightTaskId={highlightTaskId}
           />
         )}
 

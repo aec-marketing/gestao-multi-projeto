@@ -113,3 +113,5 @@ export const DEFAULT_THRESHOLDS: AlertThresholds = {
   maxWeeklyHours: 40,
   warningWeeklyHours: 35
 }
+
+export type { Resource }
