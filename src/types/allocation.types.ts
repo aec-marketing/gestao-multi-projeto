@@ -1,6 +1,21 @@
 // Tipos atualizados para o sistema de alocação sem porcentagem
 import { Resource, Task, Project } from './database.types'
 
+export interface CalendarEvent {
+  id: string
+  title: string
+  startDate: Date
+  endDate: Date
+  priority: 'alta' | 'media' | 'baixa'
+  resourceId: string
+  resourceName: string
+  projectId: string
+  projectName: string
+  projectCode: string
+  taskId?: string
+  taskType?: string
+}
+
 export interface Allocation {
   id: string
   resource_id: string

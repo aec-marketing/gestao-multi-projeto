@@ -1,10 +1,12 @@
 'use client'
-import React from 'react'  // ← ADICIONE ESTA LINHA
+import React from 'react'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Project, Task, Resource } from '@/types/database.types'
 import { Allocation } from '@/types/allocation.types'
 import { supabase } from '@/lib/supabase'
+import { recalculateTasksInCascade, validateTaskStartDate } from '@/utils/predecessorCalculations'
+import RecalculateModal from '@/components/modals/RecalculateModal'
 
 // Função para obter cores das tarefas (igual ao Gantt)
 function getTaskColors(type: string, isSubtask: boolean) {
@@ -75,6 +77,11 @@ export default function TableViewTab({
     field: string
   } | null>(null)
 
+  // States for predecessor recalculation
+  const [predecessors, setPredecessors] = useState<any[]>([])
+  const [showRecalculateModal, setShowRecalculateModal] = useState(false)
+  const [pendingUpdates, setPendingUpdates] = useState<any[]>([])
+
 // ADICIONE ESTES STATES:
 const [isAddingTask, setIsAddingTask] = useState(false)
 const [newTaskData, setNewTaskData] = useState({
@@ -93,6 +100,32 @@ const [newSubtaskData, setNewSubtaskData] = useState({
 const [searchTerm, setSearchTerm] = useState('')
 const [sortBy, setSortBy] = useState<'name' | 'type' | 'duration' | 'progress'>('name')
 const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+
+  // Load predecessors
+  useEffect(() => {
+    async function loadPredecessors() {
+      // Get all task IDs for this project
+      const taskIds = tasks.map(t => t.id)
+
+      if (taskIds.length === 0) {
+        setPredecessors([])
+        return
+      }
+
+      // Fetch predecessors for these tasks
+      const { data, error } = await supabase
+        .from('predecessors')
+        .select('*')
+        .in('task_id', taskIds)
+
+      if (error) {
+        console.error('Error loading predecessors:', error)
+      } else {
+        setPredecessors(data || [])
+      }
+    }
+    loadPredecessors()
+  }, [tasks])
 // Função para ordenar tarefas
 function sortTasks(tasksToSort: Task[]) {
   return [...tasksToSort].sort((a, b) => {
@@ -135,21 +168,57 @@ const mainTasks = sortTasks(
 // ADICIONE ESTA FUNÇÃO:
 async function updateTask(taskId: string, field: string, value: string | number) {
   try {
+    const { syncTaskFields } = await import('@/utils/taskDateSync')
+
     const updates: any = {}
-    
+
     // Determinar qual campo atualizar
     if (field === 'name') {
       updates.name = value
-    } else if (field === 'duration') {
-      updates.duration = parseFloat(value as string)
-    } else if (field === 'start_date') {
-      updates.start_date = value || null
-    } else if (field === 'end_date') {
-      updates.end_date = value || null
     } else if (field === 'estimated_cost') {
       updates.estimated_cost = value ? parseFloat(value as string) : 0
     } else if (field === 'actual_cost') {
       updates.actual_cost = value ? parseFloat(value as string) : 0
+    } else if (field === 'duration' || field === 'start_date' || field === 'end_date') {
+      // ========== NOVO: Sincronizar datas e duração ==========
+      const currentTask = tasks.find(t => t.id === taskId)
+      if (!currentTask) throw new Error('Tarefa não encontrada')
+
+      // Sincronizar campos relacionados
+      const syncedFields = syncTaskFields(
+        field as 'start_date' | 'end_date' | 'duration',
+        field === 'duration' ? parseFloat(value as string) : value,
+        {
+          start_date: currentTask.start_date,
+          end_date: currentTask.end_date,
+          duration: currentTask.duration
+        }
+      )
+
+      // ========== VALIDAÇÃO DE PREDECESSOR ==========
+      if (field === 'start_date' || field === 'end_date') {
+        // Validar se a nova data conflita com predecessores
+        const newStartDate = field === 'start_date'
+          ? new Date(value as string)
+          : new Date(syncedFields.start_date || currentTask.start_date!)
+
+        const validation = validateTaskStartDate(
+          currentTask,
+          newStartDate,
+          tasks,
+          predecessors
+        )
+
+        if (!validation.isValid) {
+          alert(`❌ Data inválida!\n\n${validation.message}\n\nA mudança foi cancelada para manter a consistência do projeto.`)
+          return // Não salva a mudança
+        }
+      }
+      // ========== FIM VALIDAÇÃO ==========
+
+      // Adicionar todos os campos sincronizados ao update
+      Object.assign(updates, syncedFields)
+      // ========== FIM NOVO ==========
     }
 
     const { error } = await supabase
@@ -158,7 +227,56 @@ async function updateTask(taskId: string, field: string, value: string | number)
       .eq('id', taskId)
 
     if (error) throw error
-    
+
+    console.log('💾 Atualização salva no banco:', updates)
+
+    // Check if we need to recalculate dependent tasks (for date/duration changes)
+    if (field === 'duration' || field === 'start_date' || field === 'end_date') {
+      const cascadeUpdates = recalculateTasksInCascade(taskId, tasks, predecessors)
+
+      if (cascadeUpdates.length > 0) {
+        console.log('🔄 Dependências detectadas, abrindo modal de recalculo:', cascadeUpdates)
+        setPendingUpdates(cascadeUpdates)
+        setShowRecalculateModal(true)
+        return // Don't refresh yet, wait for modal
+      }
+    }
+
+    // ========== AJUSTE DE DURAÇÃO DA TAREFA PAI ==========
+    // Se editou duração de uma subtarefa, verificar se tarefa pai precisa se ajustar
+    const updatedTask = tasks.find(t => t.id === taskId)
+    if (updatedTask?.parent_id && field === 'duration') {
+      const parentTask = tasks.find(t => t.id === updatedTask.parent_id)
+      if (parentTask) {
+        const siblings = tasks.filter(t => t.parent_id === parentTask.id)
+        const maxSubtaskDuration = Math.max(
+          ...siblings.map(s => s.id === taskId ? parseFloat(value as string) : s.duration || 0)
+        )
+
+        if (maxSubtaskDuration > (parentTask.duration || 0)) {
+          // Atualizar duração da tarefa pai
+          if (parentTask.start_date) {
+            const newParentEndDate = new Date(parentTask.start_date)
+            newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
+
+            await supabase
+              .from('tasks')
+              .update({
+                duration: maxSubtaskDuration,
+                end_date: newParentEndDate.toISOString().split('T')[0]
+              })
+              .eq('id', parentTask.id)
+          } else {
+            await supabase
+              .from('tasks')
+              .update({ duration: maxSubtaskDuration })
+              .eq('id', parentTask.id)
+          }
+        }
+      }
+    }
+    // ========== FIM AJUSTE ==========
+
     // Atualizar lista
     onRefresh()
   } catch (error) {
@@ -211,23 +329,64 @@ async function createNewSubtask(parentTaskId: string, parentType: string) {
   }
 
   try {
+    // Encontrar tarefa pai para herdar datas
+    const parentTask = tasks.find(t => t.id === parentTaskId)
+    if (!parentTask) throw new Error('Tarefa pai não encontrada')
+
     // Pegar o maior sort_order das subtarefas deste pai
     const siblings = tasks.filter(t => t.parent_id === parentTaskId)
     const maxSortOrder = Math.max(...siblings.map(t => t.sort_order || 0), 0)
 
-    const { error } = await supabase
+    // Calcular end_date baseado na duração e start_date do pai
+    let subtaskEndDate = null
+    if (parentTask.start_date) {
+      const startDate = new Date(parentTask.start_date)
+      const endDate = new Date(startDate)
+      endDate.setDate(endDate.getDate() + newSubtaskData.duration - 1)
+      subtaskEndDate = endDate.toISOString().split('T')[0]
+    }
+
+    const { error: insertError } = await supabase
       .from('tasks')
       .insert({
         project_id: project.id,
         parent_id: parentTaskId,
         name: newSubtaskData.name,
-        type: 'subtarefa', // Subtarefas têm type fixo
+        type: 'subtarefa',
         duration: newSubtaskData.duration,
+        start_date: parentTask.start_date, // Herda start_date do pai
+        end_date: subtaskEndDate, // Calcula end_date baseado na duração
         progress: 0,
         sort_order: maxSortOrder + 1
       })
 
-    if (error) throw error
+    if (insertError) throw insertError
+
+    // Verificar se a duração da subtarefa é maior que a do pai
+    const allSubtasks = [...siblings, { duration: newSubtaskData.duration }]
+    const maxSubtaskDuration = Math.max(...allSubtasks.map(s => s.duration || 0))
+
+    if (maxSubtaskDuration > (parentTask.duration || 0)) {
+      // Atualizar duração e end_date da tarefa pai
+      if (parentTask.start_date) {
+        const newParentEndDate = new Date(parentTask.start_date)
+        newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
+
+        await supabase
+          .from('tasks')
+          .update({
+            duration: maxSubtaskDuration,
+            end_date: newParentEndDate.toISOString().split('T')[0]
+          })
+          .eq('id', parentTaskId)
+      } else {
+        // Tarefa pai sem data, só atualiza duração
+        await supabase
+          .from('tasks')
+          .update({ duration: maxSubtaskDuration })
+          .eq('id', parentTaskId)
+      }
+    }
 
     // Resetar form
     setNewSubtaskData({ name: '', duration: 1 })
@@ -285,8 +444,29 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
   }
 }
 
+  // Create task names map for modal
+  const taskNamesMap = new Map(tasks.map(t => [t.id, t.name]))
+
   return (
-    <div className="bg-white rounded-lg border overflow-hidden">
+    <>
+      {/* Recalculate Modal */}
+      <RecalculateModal
+        isOpen={showRecalculateModal}
+        updates={pendingUpdates}
+        taskNames={taskNamesMap}
+        onClose={() => {
+          setShowRecalculateModal(false)
+          setPendingUpdates([])
+          onRefresh() // Still refresh to show the direct change made
+        }}
+        onApply={() => {
+          setShowRecalculateModal(false)
+          setPendingUpdates([])
+          onRefresh()
+        }}
+      />
+
+      <div className="bg-white rounded-lg border overflow-hidden">
   <div className="p-6 border-b space-y-4">
     <div>
       <h2 className="text-lg font-semibold text-gray-900">Modo Planilha</h2>
@@ -839,6 +1019,7 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
     </span>
   )}
 </div>
-    </div>
+      </div>
+    </>
   )
 }

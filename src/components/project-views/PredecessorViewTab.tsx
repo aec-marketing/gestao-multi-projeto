@@ -1,0 +1,518 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
+import { Project, Task } from '@/types/database.types'
+import AddPredecessorModal from '@/components/modals/AddPredecessorModal'
+import EditPredecessorModal from '@/components/modals/EditPredecessorModal'
+import RecalculateModal from '@/components/modals/RecalculateModal'
+
+// ============ TYPES ============
+interface Predecessor {
+  id: string
+  task_id: string
+  predecessor_id: string
+  type: string
+  lag_time: number
+  created_at: string
+}
+
+interface TaskWithPredecessors {
+  task: Task
+  predecessors: Array<{
+    predecessor: Predecessor
+    predecessorTask: Task
+  }>
+  successors: Array<{
+    successor: Predecessor
+    successorTask: Task
+  }>
+}
+
+// ============ INTERFACE ============
+interface PredecessorViewTabProps {
+  project: Project
+  tasks: Task[]
+  onRefresh: () => void
+}
+
+// ============ UTILS ============
+function getPredecessorTypeLabel(type: string): string {
+  const labels: Record<string, { name: string; icon: string }> = {
+    'FS': { name: 'Fim-Início', icon: '→' },
+    'SS': { name: 'Início-Início', icon: '⇒' },
+    'FF': { name: 'Fim-Fim', icon: '←' }
+  }
+  return `${labels[type]?.icon || '?'} ${labels[type]?.name || type}`
+}
+
+function formatLagTime(lag: number): string {
+  if (lag === 0) return 'sem lag'
+  if (lag === 0.5) return '+0.5 dia'
+  if (lag === 1) return '+1 dia'
+  if (lag > 1) return `+${lag} dias`
+  if (lag < 0) return `${lag} dias (sobreposição)`
+  return `+${lag} dias`
+}
+
+// ============ COMPONENT ============
+export default function PredecessorViewTab({
+  project,
+  tasks,
+  onRefresh
+}: PredecessorViewTabProps) {
+  const [predecessors, setPredecessors] = useState<Predecessor[]>([])
+  const [loading, setLoading] = useState(true)
+  const [filterMode, setFilterMode] = useState<'all' | 'with' | 'without'>('all')
+  const [sortBy, setSortBy] = useState<'name' | 'dependencies'>('name')
+// ========== NOVO: Modal e formulário ==========
+const [showAddModal, setShowAddModal] = useState(false)
+const [selectedTaskForPredecessor, setSelectedTaskForPredecessor] = useState<Task | null>(null)
+const [showEditModal, setShowEditModal] = useState(false)
+const [editingPredecessor, setEditingPredecessor] = useState<any>(null)
+const [showRecalculateModal, setShowRecalculateModal] = useState(false)
+const [pendingUpdates, setPendingUpdates] = useState<any[]>([])
+// ========== FIM NOVO ==========
+  // ============ LOAD PREDECESSORS ============
+  useEffect(() => {
+    loadPredecessors()
+  }, [project.id])
+
+  async function loadPredecessors() {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('predecessors')
+        .select('*')
+      
+      if (error) throw error
+      
+      // Filtrar predecessores que pertencem a tarefas deste projeto
+      const projectTaskIds = new Set(tasks.map(t => t.id))
+      const filtered = (data || []).filter(p => 
+        projectTaskIds.has(p.task_id)
+      )
+      
+      setPredecessors(filtered as Predecessor[])
+    } catch (error) {
+      console.error('Erro ao carregar predecessores:', error)
+      setPredecessors([])
+    } finally {
+      setLoading(false)
+    }
+  }
+// ========== NOVO: Função auxiliar ==========
+function getExistingPredecessorPairs() {
+  return predecessors.map(p => ({
+    task_id: p.task_id,
+    predecessor_id: p.predecessor_id
+  }))
+}
+
+// ========== FIM NOVO ==========
+// Adicionar após getExistingPredecessorPairs()
+async function handleDeletePredecessor(predecessorId: string) {
+  if (!confirm('Tem certeza que deseja remover esta dependência?')) {
+    return
+  }
+
+  const { error } = await supabase
+    .from('predecessors')
+    .delete()
+    .eq('id', predecessorId)
+
+  if (error) {
+    console.error('Erro ao deletar:', error)
+    alert('Erro ao deletar predecessor')
+    return
+  }
+
+  loadPredecessors()
+  onRefresh()
+}
+  // ============ ORGANIZE DATA ============
+  function getTaskPredecessors(taskId: string): TaskWithPredecessors | null {
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return null
+
+    // Predecessores desta tarefa (tarefas que ela depende)
+    const predecessorRelations = predecessors.filter(p => p.task_id === taskId)
+    const taskPredecessors = predecessorRelations.map(rel => {
+      const predTask = tasks.find(t => t.id === rel.predecessor_id)
+      return {
+        predecessor: rel,
+        predecessorTask: predTask!
+      }
+    }).filter(p => p.predecessorTask)
+
+    // Sucessores desta tarefa (tarefas que dependem dela)
+    const successorRelations = predecessors.filter(p => p.predecessor_id === taskId)
+    const taskSuccessors = successorRelations.map(rel => {
+      const succTask = tasks.find(t => t.id === rel.task_id)
+      return {
+        successor: rel,
+        successorTask: succTask!
+      }
+    }).filter(s => s.successorTask)
+
+    return {
+      task,
+      predecessors: taskPredecessors,
+      successors: taskSuccessors
+    }
+  }
+
+  // ============ FILTER & SORT ============
+  const mainTasks = tasks.filter(t => !t.parent_id)
+
+  let filteredTasks = mainTasks
+    .map(t => getTaskPredecessors(t.id))
+    .filter(t => t !== null) as TaskWithPredecessors[]
+
+  // Aplicar filtro
+  if (filterMode === 'with') {
+    filteredTasks = filteredTasks.filter(t =>
+      t.predecessors.length > 0 || t.successors.length > 0
+    )
+  } else if (filterMode === 'without') {
+    filteredTasks = filteredTasks.filter(t =>
+      t.predecessors.length === 0 && t.successors.length === 0
+    )
+  }
+
+  // Aplicar ordenação
+  if (sortBy === 'dependencies') {
+    filteredTasks.sort((a, b) => {
+      const aCount = a.predecessors.length + a.successors.length
+      const bCount = b.predecessors.length + b.successors.length
+      return bCount - aCount // Descendente (mais dependências primeiro)
+    })
+  } else {
+    filteredTasks.sort((a, b) => a.task.name.localeCompare(b.task.name))
+  }
+
+  // ============ RENDER ============
+  return (
+    <div className="bg-white rounded-lg border overflow-hidden">
+      {/* Header */}
+      <div className="p-6 border-b bg-gray-50">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <span>🔗 Predecessores e Dependências</span>
+            </h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Manage task dependencies and relationships
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              loadPredecessors()
+              onRefresh()
+            }}
+            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+            title="Recarregar dados"
+          >
+            🔄 Atualizar
+          </button>
+        </div>
+
+        {/* Filtros e Ordenação */}
+        <div className="flex flex-wrap gap-3 items-center">
+          {/* Filtro */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-700">Filtrar:</label>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setFilterMode('all')}
+                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                  filterMode === 'all'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Todos
+              </button>
+              <button
+                onClick={() => setFilterMode('with')}
+                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                  filterMode === 'with'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Com Dependências
+              </button>
+              <button
+                onClick={() => setFilterMode('without')}
+                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                  filterMode === 'without'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Sem Dependências
+              </button>
+            </div>
+          </div>
+
+          {/* Ordenação */}
+          <div className="flex items-center gap-2 ml-auto">
+            <label className="text-sm font-medium text-gray-700">Ordenar:</label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'name' | 'dependencies')}
+              className="px-3 py-1 text-xs border border-gray-300 rounded bg-white text-gray-900 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="name">Por Nome</option>
+              <option value="dependencies">Por Dependências</option>
+            </select>
+          </div>
+
+          {/* Contador */}
+          <div className="text-xs text-gray-600 font-medium ml-auto">
+            {filteredTasks.length} tarefa(s)
+          </div>
+        </div>
+      </div>
+
+      {/* Conteúdo */}
+      <div className="p-6">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="text-gray-500">⏳ Carregando predecessores...</div>
+          </div>
+        ) : filteredTasks.length === 0 ? (
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <div className="text-gray-400 text-2xl mb-2">🔍</div>
+              <div className="text-gray-500">Nenhuma tarefa encontrada</div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {filteredTasks.map((item) => (
+              <div
+                key={item.task.id}
+                className="border rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors"
+              >
+                {/* Cabeçalho da Tarefa */}
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                      <span className="text-blue-600 font-bold">{item.task.sort_order}</span>
+                      {item.task.name}
+                    </h3>
+                    <p className="text-xs text-gray-600 mt-1">
+                      Tipo: <span className="font-medium">{item.task.type}</span>
+                      {' • '}
+                      Duração: <span className="font-medium">{item.task.duration} dias</span>
+                      {' • '}
+                      Progresso: <span className="font-medium">{item.task.progress || 0}%</span>
+                    </p>
+                  </div>
+                  <div className="text-right text-xs text-gray-500">
+                    <div>Predecessores: <span className="font-bold text-gray-900">{item.predecessors.length}</span></div>
+                    <div>Dependentes: <span className="font-bold text-gray-900">{item.successors.length}</span></div>
+                  </div>
+                </div>
+                {/* ========== NOVO: Modal de Adicionar Predecessor ==========*/}
+<AddPredecessorModal
+  isOpen={showAddModal}
+  task={selectedTaskForPredecessor}
+  allTasks={tasks}
+  existingPredecessors={getExistingPredecessorPairs()}
+  allPredecessors={predecessors}
+  onClose={() => {
+    setShowAddModal(false)
+    setSelectedTaskForPredecessor(null)
+  }}
+  onSuccess={() => {
+    loadPredecessors()
+    onRefresh()
+  }}
+  onRecalculate={(updates) => {
+    setPendingUpdates(updates)
+    setShowRecalculateModal(true)
+  }}
+/>
+
+{/* Modal de Editar */}
+<EditPredecessorModal
+  isOpen={showEditModal}
+  predecessor={editingPredecessor}
+  allTasks={tasks}
+  allPredecessors={predecessors}
+  onClose={() => {
+    setShowEditModal(false)
+    setEditingPredecessor(null)
+  }}
+  onSuccess={() => {
+    loadPredecessors()
+    onRefresh()
+  }}
+  onRecalculate={(updates) => {
+    setPendingUpdates(updates)
+    setShowRecalculateModal(true)
+  }}
+/>
+
+{/* Modal de Recalcular */}
+<RecalculateModal
+  isOpen={showRecalculateModal}
+  updates={pendingUpdates}
+  taskNames={new Map(tasks.map(t => [t.id, t.name]))}
+  onClose={() => {
+    setShowRecalculateModal(false)
+    setPendingUpdates([])
+    loadPredecessors()
+    onRefresh()
+  }}
+  onApply={() => {
+    setShowRecalculateModal(false)
+    setPendingUpdates([])
+    loadPredecessors()
+    onRefresh()
+  }}
+/>
+{/* ========== FIM NOVO ==========*/}
+{/* ========== NOVO: Botão Adicionar ==========*/}
+<div className="mb-4">
+  <button
+    onClick={() => {
+      setSelectedTaskForPredecessor(item.task)
+      setShowAddModal(true)
+    }}
+    className="px-3 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors"
+  >
+    + Adicionar Predecessor
+  </button>
+</div>
+{/* ========== FIM NOVO ==========*/}
+                {/* Predecessores (tarefas que esta depende) */}
+                <div className="mb-4">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    📥 Depende de ({item.predecessors.length}):
+                  </h4>
+                  {item.predecessors.length === 0 ? (
+                    <p className="text-xs text-gray-500 italic">Nenhuma dependência</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {item.predecessors.map((rel) => (
+                        <li
+                          key={rel.predecessor.id}
+                          className="flex items-center gap-2 text-xs bg-blue-50 border border-blue-200 rounded p-2"
+                        >
+                          <span className="font-mono text-blue-700 font-bold min-w-[40px]">
+                            {rel.predecessorTask.sort_order}
+                          </span>
+                          <span className="flex-1 text-gray-900">
+                            {rel.predecessorTask.name}
+                          </span>
+                          <span className="text-blue-600 font-medium whitespace-nowrap">
+                            {getPredecessorTypeLabel(rel.predecessor.type)}
+                          </span>
+                          <span className="text-gray-600 whitespace-nowrap">
+                            {formatLagTime(rel.predecessor.lag_time)}
+                          </span>
+
+                          {/* Botões Editar/Deletar */}
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => {
+                                setEditingPredecessor(rel.predecessor)
+                                setShowEditModal(true)
+                              }}
+                              className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                            >
+                              ✏️ Editar
+                            </button>
+                            <button
+                              onClick={() => handleDeletePredecessor(rel.predecessor.id)}
+                              className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                            >
+                              ❌
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Sucessores (tarefas que dependem desta) */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    📤 Depende dela ({item.successors.length}):
+                  </h4>
+                  {item.successors.length === 0 ? (
+                    <p className="text-xs text-gray-500 italic">Nenhuma tarefa depende dela</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {item.successors.map((rel) => (
+                        <li
+                          key={rel.successor.id}
+                          className="flex items-center gap-2 text-xs bg-green-50 border border-green-200 rounded p-2"
+                        >
+                          <span className="font-mono text-green-700 font-bold min-w-[40px]">
+                            {rel.successorTask.sort_order}
+                          </span>
+                          <span className="flex-1 text-gray-900">
+                            {rel.successorTask.name}
+                          </span>
+                          <span className="text-green-600 font-medium whitespace-nowrap">
+                            {getPredecessorTypeLabel(rel.successor.type)}
+                          </span>
+                          <span className="text-gray-600 whitespace-nowrap">
+                            {formatLagTime(rel.successor.lag_time)}
+                          </span>
+
+                          {/* Botões Editar/Deletar */}
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => {
+                                setEditingPredecessor(rel.successor)
+                                setShowEditModal(true)
+                              }}
+                              className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                            >
+                              ✏️ Editar
+                            </button>
+                            <button
+                              onClick={() => handleDeletePredecessor(rel.successor.id)}
+                              className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                            >
+                              ❌
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Divisor */}
+                <div className="mt-4 pt-4 border-t border-gray-200" />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer com Info */}
+      <div className="px-6 py-4 bg-gray-50 border-t text-xs text-gray-600">
+        <div className="flex items-center justify-between">
+          <div>
+            💡 <strong>Legenda:</strong>
+            {' → '}(Fim-Início)
+            {' | ⇒ '}(Início-Início)
+            {' | ← '}(Fim-Fim)
+          </div>
+          <div className="text-right">
+            Total de Predecessores: <strong>{predecessors.length}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

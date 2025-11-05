@@ -8,12 +8,14 @@ import GanttViewTab from '@/components/project-views/GanttViewTab'
 import TableViewTab from '@/components/project-views/TableViewTab'
 import TimelineViewTab from './project-views/TimelineViewTab'
 import FinancialViewTab from '@/components/project-views/FinancialViewTab'
+import PredecessorViewTab from './project-views/PredecessorViewTab'
+
 interface ProjectGanttPageProps {
   projectId: string
   highlightTaskId?: string
 }
 
-type ViewMode = 'gantt' | 'table' | 'timeline' | 'financial'
+type ViewMode = 'gantt' | 'table' | 'timeline' | 'financial' | 'predecessors'
 
 export default function ProjectGanttPage({ projectId, highlightTaskId }: ProjectGanttPageProps) {
   const [project, setProject] = useState<Project | null>(null)
@@ -95,6 +97,10 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
     )
   }
 
+  function onRefresh(): void {
+    loadProjectData()
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -156,6 +162,16 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
               📋 Tabela
             </button>
             <button
+              onClick={() => setViewMode('predecessors')}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
+                viewMode === 'predecessors'
+                  ? 'text-blue-600 border-blue-600'
+                  : 'text-gray-600 border-transparent hover:text-gray-900'
+              }`}
+            >
+              🔗 Predecessores
+            </button>
+            <button
               onClick={() => setViewMode('timeline')}
               className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
                 viewMode === 'timeline'
@@ -191,7 +207,13 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
             highlightTaskId={highlightTaskId}
           />
         )}
-
+{viewMode === 'predecessors' && (
+  <PredecessorViewTab
+    project={project}
+    tasks={tasks}
+    onRefresh={onRefresh}
+  />
+)}
         {viewMode === 'table' && (
           <TableViewTab
             project={project}

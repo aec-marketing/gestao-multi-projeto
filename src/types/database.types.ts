@@ -19,25 +19,36 @@ export type Database = {
           notes: string | null
               estimated_cost: number        // ← ADICIONE
     actual_cost: number           // ← ADICIONE
+              outline_level: number        // Nível hierárquico (1, 2, 3...)
+          wbs_code: string | null      // Código WBS (1, 1.1, 1.1.1)
+          is_summary: boolean          // É tarefa sumária?
+          
           created_at: string
           updated_at: string
         }
         Insert: {
           id?: string
-          code: string
+          project_id: string
           name: string
-          category: 'laudo_tecnico' | 'projeto_mecanico' | 'projeto_eletrico' | 'projeto_mecanico_eletrico' | 'projeto_completo' | 'manutencao' | 'readequacao' | 'retrofit'
-          vendor_name: string
-          leader_id?: string | null
-          template_id?: string | null
-          complexity?: 'simples' | 'padrao' | 'complexo'
-          buffer_days?: number
+          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa'
+          parent_id?: string | null
+          duration?: number
           start_date?: string | null
           end_date?: string | null
-          is_active?: boolean
+          is_optional?: boolean
+          is_critical_path?: boolean
+          progress?: number
           notes?: string | null
-              estimated_cost?: number       // ← ADICIONE
-    actual_cost?: number          // ← ADICIONE
+          sort_order?: number
+          estimated_cost?: number
+          actual_cost?: number
+          margin_start?: number
+          margin_end?: number
+          
+          // ===== ADICIONAR ESTES 3 CAMPOS =====
+          outline_level?: number
+          wbs_code?: string | null
+          is_summary?: boolean
         }
         Update: {
           id?: string
@@ -144,6 +155,10 @@ export type Database = {
           actual_cost?: number
           margin_start?: number
           margin_end?: number
+          // ===== ADICIONAR ESTES 3 CAMPOS =====
+          outline_level?: number
+          wbs_code?: string | null
+          is_summary?: boolean
         }
       }
     }
@@ -176,3 +191,48 @@ export type ProjectCategory = Project['category']
 export type ProjectComplexity = Project['complexity']
 export type ResourceRole = Resource['role']
 export type TaskType = Task['type']
+
+
+// Tipos para Import MS Project
+export interface MSProjectTask {
+  uid: number                  // UID do XML
+  name: string
+  outlineNumber: string        // Ex: "1.1.1"
+  outlineLevel: number         // 0, 1, 2, 3...
+  start: Date
+  finish: Date
+  duration: number             // Em dias
+  percentComplete: number
+  isSummary: boolean
+  isCritical: boolean
+  predecessors: {
+    uid: number
+    type: 'FF' | 'FS' | 'SF' | 'SS'
+    lag: number                // Em dias
+  }[]
+}
+
+// Tipo para preview antes do import
+export interface ImportPreview {
+  project: {
+    code: string
+    name: string
+    startDate: Date
+    endDate: Date
+    totalTasks: number
+    totalDuration: number
+  }
+  tasks: MSProjectTask[]
+  stats: {
+    level1Tasks: number
+    level2Tasks: number
+    level3PlusTasks: number    // Tarefas de nível 3 ou superior
+    tasksWithPredecessors: number
+    completedTasks: number
+    summaryTasks: number
+    criticalTasks: number
+  }
+}
+
+// Mapa de UID do XML para ID do banco (usado durante import)
+export type UIDMap = Map<number, string>

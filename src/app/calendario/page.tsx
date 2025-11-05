@@ -142,7 +142,7 @@ function CalendarPageContent() {
         .order('name', { ascending: true })
 
       // Filtrar líderes no cliente
-      const filteredLeaders = leadersData?.filter(r =>
+      const filteredLeaders = leadersData?.filter((r: { role: string }) =>
         r.role?.toLowerCase().includes('lider') ||
         r.role?.toLowerCase().includes('líder') ||
         r.role?.toLowerCase().includes('gerente')

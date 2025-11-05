@@ -7,6 +7,10 @@ import { Allocation } from '@/types/allocation.types'
 import AllocationModal from '@/components/AllocationModal'
 import { parseLocalDate, formatDateBR } from '@/utils/date.utils'
 import SubtaskManager from '@/components/SubtaskManager'
+import PredecessorLines from '@/components/gantt/PredecessorLines'
+import { recalculateTasksInCascade, validateTaskStartDate, auditPredecessorConflicts } from '@/utils/predecessorCalculations'
+import RecalculateModal from '@/components/modals/RecalculateModal'
+
 
 interface GanttViewTabProps {
   project: Project
@@ -14,6 +18,7 @@ interface GanttViewTabProps {
   resources: Resource[]
   allocations: Allocation[]
   onRefresh: () => void
+  highlightTaskId?: string
 }
 
 interface TaskWithDates extends Omit<Task, 'start_date' | 'end_date'> {
@@ -90,7 +95,8 @@ export default function GanttViewTab({
   tasks,
   resources,
   allocations,
-  onRefresh
+  onRefresh,
+  highlightTaskId
 }: GanttViewTabProps) {
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
   const [draggedTask, setDraggedTask] = useState<string | null>(null)
@@ -118,6 +124,20 @@ const [tempDurations, setTempDurations] = useState<Map<string, number>>(new Map(
 
 // Estado para armazenar offset de posição temporário (para alça esquerda)
 const [tempStartOffsets, setTempStartOffsets] = useState<Map<string, number>>(new Map())
+
+  // ========== NOVO: Estado de Zoom ==========
+  const [zoomLevel, setZoomLevel] = useState<'day' | 'week' | 'month'>('week')
+  // ========== FIM NOVO ==========
+
+  // ========== NOVO: Estado para Dia Selecionado ==========
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  // ========== FIM NOVO ==========
+const [predecessors, setPredecessors] = useState<any[]>([])
+
+  // ========== NOVO: Estados para Recalculação em Cascata ==========
+  const [showRecalculateModal, setShowRecalculateModal] = useState(false)
+  const [pendingUpdates, setPendingUpdates] = useState<any[]>([])
+  // ========== FIM NOVO ==========
 
   function calculateTaskDates(): TaskWithDates[] {
     if (!project?.start_date) return []
@@ -159,8 +179,10 @@ const [tempStartOffsets, setTempStartOffsets] = useState<Map<string, number>>(ne
             const subEnd = parseLocalDate(subtask.end_date)
             if (!subStart || !subEnd) return
 
-            // Calcular duração REAL baseada nas datas (não usar subtask.duration)
-            const realDuration = Math.floor((subEnd.getTime() - subStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
+            // Calcular duração REAL baseada nas datas
+            // IMPORTANTE: +1 porque o dia inicial conta
+            // Exemplo: 30/10 a 01/11 = 2 dias de diferença + 1 = 3 dias totais
+            const realDuration = Math.max(1, Math.ceil((subEnd.getTime() - subStart.getTime()) / (1000 * 60 * 60 * 24)) + 1)
 
             processedSubtasks.push({
               ...subtask,
@@ -208,7 +230,8 @@ const [tempStartOffsets, setTempStartOffsets] = useState<Map<string, number>>(ne
         }
 
         // Calcular duração real incluindo gaps e margens
-        const taskDuration = Math.floor((taskEndDate.getTime() - taskStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+        // IMPORTANTE: +1 porque o dia inicial conta
+        const taskDuration = Math.max(1, Math.ceil((taskEndDate.getTime() - taskStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1)
 
         // Adicionar tarefa principal
         result.push({
@@ -387,8 +410,21 @@ const [tempStartOffsets, setTempStartOffsets] = useState<Map<string, number>>(ne
   }
 
   // Função para calcular estilo da barra
+  // ========== NOVO: Função auxiliar para largura da coluna ==========
+  const getColumnWidth = (): number => {
+    switch (zoomLevel) {
+      case 'day': return 120    // Zoom in: 120px por dia
+      case 'week': return 50    // Normal: 50px por dia
+      case 'month': return 15   // Zoom out: 15px por dia (reduzido)
+      default: return 50
+    }
+  }
+  // ========== FIM NOVO ==========
+
   const getTaskBarStyle = (task: TaskWithDates) => {
     if (dateGrid.length === 0) return {}
+
+    const columnWidth = getColumnWidth() // ← NOVO
 
     const taskStart = task.start_date
     const taskEnd = task.end_date
@@ -405,30 +441,23 @@ const [tempStartOffsets, setTempStartOffsets] = useState<Map<string, number>>(ne
     // Se não encontrar no grid, usar fallback
     if (startIndex === -1) return {}
 
+    // ========== MODIFICADO: Usar columnWidth em vez de 50 ==========
     // Calcular posição left - aplicar offset temporário se estiver redimensionando pela esquerda
-    let leftPx = startIndex * 50 // 50px por dia
+    let leftPx = startIndex * columnWidth  // MODIFICADO (era: startIndex * 50)
     if (tempStartOffsets.has(task.id)) {
       const offsetDays = tempStartOffsets.get(task.id)!
-      leftPx += offsetDays * 50
+      leftPx += offsetDays * columnWidth  // MODIFICADO (era: offsetDays * 50)
     }
+    // ========== FIM MODIFICADO ==========
 
-    // Calcular largura: do início do dia de início até o FIM do dia de término
-    // Se endIndex foi encontrado, usar ele; senão, calcular baseado na duração
+    // Calcular largura: usar duration_days da tarefa (mais confiável)
     let widthPx: number
-    if (endIndex !== -1) {
+    if (tempDurations.has(task.id)) {
       // Usar duração temporária se estiver redimensionando
-      if (tempDurations.has(task.id)) {
-        widthPx = tempDurations.get(task.id)! * 50
-      } else {
-        // Do início do startIndex até o FIM do endIndex (endIndex + 1)
-        widthPx = (endIndex - startIndex + 1) * 50
-      }
+      widthPx = tempDurations.get(task.id)! * columnWidth
     } else {
-      // Fallback: usar duration_days
-      const displayDuration = tempDurations.has(task.id)
-        ? tempDurations.get(task.id)!
-        : task.duration_days
-      widthPx = displayDuration * 50
+      // Usar duration_days da tarefa (campo correto que já considera a duração real)
+      widthPx = task.duration_days * columnWidth
     }
 
     return {
@@ -624,16 +653,25 @@ async function updateTaskDuration(taskId: string, newDuration: number, edge: 'st
           if (error) throw error
         } else {
           // Alça esquerda: manter end_date, alterar start_date
-          // Fórmula: newStart = endDate - Math.ceil(finalDuration) + 1
-          //
-          // Mas precisamos garantir consistência:
-          // Se duration = 11.875 dias (11 dias + 7 horas)
-          // Devemos usar 12 dias completos no cálculo visual
           const daysToSubtract = Math.ceil(finalDuration)
-
           const newStartDate = new Date(endDate)
           newStartDate.setDate(newStartDate.getDate() - daysToSubtract + 1)
           const formattedStartDate = newStartDate.toISOString().split('T')[0]
+
+          // ========== VALIDAÇÃO DE PREDECESSOR ==========
+          const validation = validateTaskStartDate(
+            task,
+            newStartDate,
+            tasks,
+            predecessors
+          )
+
+          if (!validation.isValid) {
+            alert(`❌ Não é possível mover a tarefa para esta data!\n\n${validation.message}\n\nUse a aba "Predecessor" para ajustar as dependências.`)
+            onRefresh() // Recarrega para reverter mudança visual
+            return
+          }
+          // ========== FIM VALIDAÇÃO ==========
 
           const { error } = await supabase
             .from('tasks')
@@ -656,7 +694,71 @@ async function updateTaskDuration(taskId: string, newDuration: number, edge: 'st
       }
     }
 
-    onRefresh()
+    // ========== AJUSTE DE TAREFA PAI SE FOR SUBTAREFA ==========
+    if (task.parent_id) {
+      const parentTask = tasks.find(t => t.id === task.parent_id)
+      if (parentTask) {
+        const siblings = tasks.filter(t => t.parent_id === parentTask.id)
+        const maxSubtaskDuration = Math.max(
+          ...siblings.map(s => s.id === taskId ? finalDuration : s.duration || 0)
+        )
+
+        if (maxSubtaskDuration > (parentTask.duration || 0)) {
+          // Atualizar duração da tarefa pai
+          if (parentTask.start_date) {
+            const newParentEndDate = new Date(parentTask.start_date)
+            newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
+
+            await supabase
+              .from('tasks')
+              .update({
+                duration: maxSubtaskDuration,
+                end_date: newParentEndDate.toISOString().split('T')[0]
+              })
+              .eq('id', parentTask.id)
+          } else {
+            await supabase
+              .from('tasks')
+              .update({ duration: maxSubtaskDuration })
+              .eq('id', parentTask.id)
+          }
+        }
+      }
+    }
+    // ========== FIM AJUSTE ==========
+
+    // ========== NOVO: Recalcular tarefas dependentes em cascata ==========
+    // Buscar dados atualizados do banco para garantir que temos as datas corretas
+    const { data: updatedTasks, error: fetchError } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('project_id', project.id)
+      .order('sort_order')
+
+    if (fetchError) {
+      console.error('Erro ao buscar tarefas atualizadas:', fetchError)
+      onRefresh()
+      return
+    }
+
+    const updates = recalculateTasksInCascade(
+      taskId,
+      updatedTasks || tasks, // Usar dados atualizados do banco
+      predecessors
+    )
+
+    console.log('🔄 Updates de recálculo gerados:', updates.length)
+
+    if (updates.length > 0) {
+      // Há tarefas dependentes que precisam ser recalculadas
+      setPendingUpdates(updates)
+      setShowRecalculateModal(true)
+    } else {
+      // Sem dependentes, apenas recarrega
+      onRefresh()
+    }
+    // ========== FIM NOVO ==========
+
   } catch (error) {
     console.error('Erro ao atualizar duração:', error)
     alert('Erro ao atualizar duração')
@@ -679,6 +781,153 @@ function handleResizeStart(taskId: string, edge: 'start' | 'end', e: React.Mouse
     startLeft: rect.left
   })
 }
+useEffect(() => {
+  loadPredecessors()
+}, [project.id])
+
+async function loadPredecessors() {
+  const { data, error } = await supabase
+    .from('predecessors')
+    .select('*')
+    .in('task_id', tasks.map(t => t.id))
+
+  if (!error && data) {
+    setPredecessors(data)
+
+    // ========== NOVO: Calcular datas iniciais para tarefas sem data ==========
+    await calculateInitialDates(data)
+    // ========== FIM NOVO ==========
+  }
+}
+
+// ========== NOVO: Função para calcular datas iniciais ==========
+async function calculateInitialDates(predecessorData: any[]) {
+  console.log('🔄 Verificando tarefas sem data que têm predecessores...')
+
+  // Encontrar tarefas sem start_date que têm predecessores
+  const tasksWithoutDates = tasks.filter(t => !t.start_date && predecessorData.some(p => p.task_id === t.id))
+
+  if (tasksWithoutDates.length === 0) {
+    console.log('✅ Todas as tarefas com predecessores já têm datas')
+    return
+  }
+
+  console.log(`📋 Encontradas ${tasksWithoutDates.length} tarefa(s) sem data:`, tasksWithoutDates.map(t => t.name))
+
+  // Para cada tarefa sem data, calcular baseado nos predecessores
+  const updates = []
+
+  for (const task of tasksWithoutDates) {
+    // Pegar todos os predecessores desta tarefa
+    const taskPreds = predecessorData.filter(p => p.task_id === task.id)
+
+    for (const pred of taskPreds) {
+      const predecessorTask = tasks.find(t => t.id === pred.predecessor_id)
+
+      if (predecessorTask && predecessorTask.start_date) {
+        try {
+          const { calculateTaskDateFromPredecessor } = await import('@/utils/predecessorCalculations')
+
+          const newDates = calculateTaskDateFromPredecessor(
+            task,
+            predecessorTask,
+            pred
+          )
+
+          updates.push({
+            id: task.id,
+            start_date: newDates.start_date.toISOString().split('T')[0],
+            end_date: newDates.end_date.toISOString().split('T')[0],
+            reason: `Data inicial calculada baseada no predecessor "${predecessorTask.name}"`
+          })
+
+          console.log(`✅ Calculada data para "${task.name}": ${newDates.start_date.toISOString().split('T')[0]}`)
+          break // Usar apenas o primeiro predecessor para cálculo inicial
+
+        } catch (error) {
+          console.error(`❌ Erro ao calcular data para "${task.name}":`, error)
+        }
+      }
+    }
+  }
+
+  // Se há updates, aplicar diretamente ou mostrar modal
+  if (updates.length > 0) {
+    console.log(`💾 Aplicando ${updates.length} data(s) inicial(is)...`)
+
+    const { calculateDurationFromDates } = await import('@/utils/taskDateSync')
+
+    for (const update of updates) {
+      // Calcular duração baseada nas datas
+      const calculatedDuration = calculateDurationFromDates(
+        update.start_date,
+        update.end_date
+      )
+
+      await supabase
+        .from('tasks')
+        .update({
+          start_date: update.start_date,
+          end_date: update.end_date,
+          duration: calculatedDuration  // ✅ Atualizar duration também!
+        })
+        .eq('id', update.id)
+    }
+
+    console.log('✅ Datas iniciais aplicadas com sucesso')
+    onRefresh() // Recarregar para mostrar as mudanças
+  }
+}
+// ========== FIM NOVO ==========
+
+// ========== FUNÇÃO DE AUDITORIA DE CONFLITOS ==========
+async function handleAuditConflicts() {
+  console.log('🔍 Iniciando auditoria de conflitos...')
+
+  try {
+    // Buscar dados atualizados do banco
+    const { data: allTasks, error: tasksError } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('project_id', project.id)
+      .order('sort_order')
+
+    const { data: allPredecessors, error: predsError } = await supabase
+      .from('predecessors')
+      .select('*')
+      .in('task_id', tasks.map(t => t.id))
+
+    if (tasksError || predsError) {
+      console.error('Erro ao buscar dados:', tasksError || predsError)
+      alert('Erro ao buscar dados para auditoria')
+      return
+    }
+
+    if (!allTasks || !allPredecessors) {
+      console.log('Sem dados para auditar')
+      onRefresh()
+      return
+    }
+
+    // Executar auditoria
+    const conflicts = auditPredecessorConflicts(allTasks, allPredecessors)
+
+    if (conflicts.length === 0) {
+      // Sem conflitos encontrados!
+      alert('✅ Nenhum conflito encontrado!\n\nTodas as tarefas estão sincronizadas corretamente com seus predecessores.')
+      onRefresh()
+    } else {
+      // Conflitos encontrados - mostrar modal de recálculo
+      console.log(`⚠️ ${conflicts.length} conflito(s) encontrado(s)`)
+      setPendingUpdates(conflicts)
+      setShowRecalculateModal(true)
+    }
+  } catch (error) {
+    console.error('Erro ao auditar conflitos:', error)
+    alert('Erro ao auditar conflitos: ' + (error as Error).message)
+  }
+}
+// ========== FIM FUNÇÃO DE AUDITORIA ==========
 
 // useEffect para lidar com mousemove e mouseup globalmente
 useEffect(() => {
@@ -923,13 +1172,26 @@ useEffect(() => {
         <div className="relative h-20 border-r flex-1">
           {/* Grid de fundo */}
           <div className="absolute inset-0 flex">
-            {dateGrid.map((_, index) => (
-              <div
-                key={index}
-                className="border-r border-gray-100"
-                style={{ width: '50px', minWidth: '50px' }}
-              />
-            ))}
+            {dateGrid.map((date, index) => {
+              const columnWidth = getColumnWidth()
+              const dateKey = date.toISOString().split('T')[0]
+              const isSelected = selectedDay === dateKey
+              const isToday = date.toDateString() === new Date().toDateString()
+
+              return (
+                <div
+                  key={index}
+                  className={`border-r ${
+                    isSelected
+                      ? 'bg-blue-50 border-blue-300 border-r-2'
+                      : isToday
+                      ? 'bg-yellow-50 border-yellow-200'
+                      : 'border-gray-100'
+                  }`}
+                  style={{ width: `${columnWidth}px`, minWidth: `${columnWidth}px` }}
+                />
+              )
+            })}
           </div>
 
           {/* Linha de conexão */}
@@ -1062,10 +1324,11 @@ useEffect(() => {
               </p>
             </div>
             <button
-              onClick={onRefresh}
+              onClick={handleAuditConflicts}
               className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+              title="Verificar e corrigir conflitos de predecessores"
             >
-              🔄 Atualizar
+              🔄 Verificar Conflitos
             </button>
           </div>
         </div>
@@ -1144,6 +1407,45 @@ useEffect(() => {
                   Limpar filtros
                 </button>
               )}
+
+              {/* ========== NOVO: Controles de Zoom ========== */}
+              <div className="flex items-center gap-2 border-l pl-4">
+                <span className="text-xs font-medium text-gray-700 mr-2">Zoom:</span>
+
+                <button
+                  onClick={() => setZoomLevel('day')}
+                  className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                    zoomLevel === 'day'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  📅 Dia
+                </button>
+
+                <button
+                  onClick={() => setZoomLevel('week')}
+                  className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                    zoomLevel === 'week'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  📆 Semana
+                </button>
+
+                <button
+                  onClick={() => setZoomLevel('month')}
+                  className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+                    zoomLevel === 'month'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  📊 Mês
+                </button>
+              </div>
+              {/* ========== FIM NOVO ========== */}
             </div>
           </div>
         </div>
@@ -1153,32 +1455,75 @@ useEffect(() => {
           className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-280px)] transition-all duration-300"
           style={{ paddingBottom: selectedTask ? '200px' : '0' }}
         >
-          <div className="min-w-max">
+          <div className="min-w-max relative">
             {/* Cabeçalho de datas */}
 <div className="flex border-b bg-gray-50 sticky top-0 z-20">
               <div className="w-80 px-4 py-2 border-r font-medium text-gray-700">
                 Tarefa
               </div>
               <div className="flex">
-                {dateGrid.map((date, index) => (
-                  <div
-                    key={index}
-                    className="border-r px-2 py-2 text-center"
-                    style={{ width: '50px', minWidth: '50px' }}
-                  >
-                    <div className="text-xs font-medium text-gray-700">
-                      {date.getDate()}
+                {dateGrid.map((date, index) => {
+                  const columnWidth = getColumnWidth()
+                  const dateKey = date.toISOString().split('T')[0]
+                  const isSelected = selectedDay === dateKey
+                  const isToday = date.toDateString() === new Date().toDateString()
+
+                  // Ajustar espaçamento e fonte baseado no zoom
+                  const padding = zoomLevel === 'month' ? 'px-0.5 py-1' : zoomLevel === 'day' ? 'px-4 py-2' : 'px-2 py-2'
+                  const fontSize = zoomLevel === 'month' ? 'text-[9px]' : 'text-xs'
+
+                  return (
+                    <div
+                      key={index}
+                      className={`border-r text-center cursor-pointer transition-colors ${padding} ${
+                        isSelected
+                          ? 'bg-blue-100 border-blue-400 border-2'
+                          : isToday
+                          ? 'bg-yellow-50'
+                          : 'hover:bg-gray-100'
+                      }`}
+                      style={{ width: `${columnWidth}px`, minWidth: `${columnWidth}px` }}
+                      onClick={() => setSelectedDay(isSelected ? null : dateKey)}
+                      title={`${date.toLocaleDateString('pt-BR', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}${isToday ? ' (Hoje)' : ''}`}
+                    >
+                      <div className={`${fontSize} font-medium ${isSelected ? 'text-blue-700' : 'text-gray-700'}`}>
+                        {date.getDate()}
+                      </div>
+                      {zoomLevel !== 'month' && (
+                        <div className={`${fontSize} ${isSelected ? 'text-blue-600' : 'text-gray-500'}`}>
+                          {date.toLocaleDateString('pt-BR', { month: 'short' })}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-xs text-gray-500">
-                      {date.toLocaleDateString('pt-BR', { month: 'short' })}
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
 
-            {/* Linhas de tarefas */}
-            {organizedTasks.map((task) => renderTask(task, 0))}
+            {/* ========== NOVO: Container de linhas com overlay SVG ========== */}
+            <div className="relative">
+              {/* Linhas de tarefas */}
+              {organizedTasks.map((task) => renderTask(task, 0))}
+
+              {/* Linhas de Predecessores - overlay absoluto */}
+              <PredecessorLines
+                tasks={tasks}
+                predecessors={predecessors}
+                dateRange={{
+                  start: dateGrid.length > 0 ? dateGrid[0] : new Date(),
+                  end: dateGrid.length > 0 ? dateGrid[dateGrid.length - 1] : new Date()
+                }}
+                dayWidth={getColumnWidth()}
+                rowHeight={80}
+                expandedTasks={expandedTasks}
+              />
+            </div>
+            {/* ========== FIM NOVO ========== */}
           </div>
         </div>
       </div>
@@ -1410,6 +1755,24 @@ useEffect(() => {
     </div>
   )
 })()}
+
+      {/* ========== NOVO: Modal de Recalculação em Cascata ========== */}
+      <RecalculateModal
+        isOpen={showRecalculateModal}
+        updates={pendingUpdates}
+        taskNames={new Map(tasks.map(t => [t.id, t.name]))}
+        onClose={() => {
+          setShowRecalculateModal(false)
+          setPendingUpdates([])
+          onRefresh() // Recarrega mesmo se cancelar
+        }}
+        onApply={() => {
+          setShowRecalculateModal(false)
+          setPendingUpdates([])
+          onRefresh() // Recarrega após aplicar
+        }}
+      />
+      {/* ========== FIM NOVO ========== */}
     </>
   )
 }

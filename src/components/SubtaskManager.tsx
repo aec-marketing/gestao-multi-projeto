@@ -36,6 +36,15 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
         ? allProjectTasks[0].sort_order + 1
         : 1
 
+      // Calcular end_date baseado na duração e start_date do pai
+      let subtaskEndDate = null
+      if (parentTask.start_date) {
+        const startDate = new Date(parentTask.start_date)
+        const endDate = new Date(startDate)
+        endDate.setDate(endDate.getDate() + parseFloat(subtaskDuration) - 1)
+        subtaskEndDate = endDate.toISOString().split('T')[0]
+      }
+
       // Criar a subtarefa
       const { data: newSubtask, error: insertError } = await supabase
         .from('tasks')
@@ -45,6 +54,8 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
           type: 'subtarefa',
           parent_id: parentTask.id,
           duration: parseFloat(subtaskDuration),
+          start_date: parentTask.start_date, // Herda start_date do pai
+          end_date: subtaskEndDate, // Calcula end_date baseado na duração
           progress: 0,
           sort_order: nextSortOrder,
           is_optional: false,
@@ -54,6 +65,38 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
         .single()
 
       if (insertError) throw insertError
+
+      // Verificar se a duração da subtarefa é maior que a do pai
+      // Buscar todas as subtarefas do pai para calcular a maior duração
+      const { data: siblings } = await supabase
+        .from('tasks')
+        .select('duration')
+        .eq('parent_id', parentTask.id)
+
+      const allDurations = [...(siblings || []).map(s => s.duration || 0), parseFloat(subtaskDuration)]
+      const maxSubtaskDuration = Math.max(...allDurations)
+
+      if (maxSubtaskDuration > (parentTask.duration || 0)) {
+        // Atualizar duração e end_date da tarefa pai
+        if (parentTask.start_date) {
+          const newParentEndDate = new Date(parentTask.start_date)
+          newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
+
+          await supabase
+            .from('tasks')
+            .update({
+              duration: maxSubtaskDuration,
+              end_date: newParentEndDate.toISOString().split('T')[0]
+            })
+            .eq('id', parentTask.id)
+        } else {
+          // Tarefa pai sem data, só atualiza duração
+          await supabase
+            .from('tasks')
+            .update({ duration: maxSubtaskDuration })
+            .eq('id', parentTask.id)
+        }
+      }
 
       // Buscar alocações de líderes/gerentes da tarefa pai
       const { data: parentAllocations } = await supabase
