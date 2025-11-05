@@ -77,13 +77,11 @@ export default function EditPredecessorModal({
     setIsSubmitting(false)
 
     if (error) {
-      console.error('Erro ao editar predecessor:', error)
       alert('Erro ao salvar alterações')
       return
     }
 
     // Recalcular tarefas dependentes após alterar o predecessor
-    console.log('🔄 Predecessor alterado, recalculando tarefas dependentes...')
 
     // Atualizar o predecessor no array para cálculo correto
     const updatedPredecessors = allPredecessors.map(p =>

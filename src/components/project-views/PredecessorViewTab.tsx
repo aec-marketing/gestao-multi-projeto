@@ -95,7 +95,6 @@ const [pendingUpdates, setPendingUpdates] = useState<any[]>([])
       
       setPredecessors(filtered as Predecessor[])
     } catch (error) {
-      console.error('Erro ao carregar predecessores:', error)
       setPredecessors([])
     } finally {
       setLoading(false)
@@ -122,7 +121,6 @@ async function handleDeletePredecessor(predecessorId: string) {
     .eq('id', predecessorId)
 
   if (error) {
-    console.error('Erro ao deletar:', error)
     alert('Erro ao deletar predecessor')
     return
   }

@@ -84,7 +84,6 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
       // Carregar eventos pessoais
       await fetchPersonalEvents()
     } catch (error) {
-      console.error('Erro ao carregar dados:', error)
     } finally {
       setIsLoading(false)
     }
@@ -104,7 +103,6 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
 
       setPersonalEvents(data || [])
     } catch (error) {
-      console.error('Erro ao buscar eventos pessoais:', error)
     }
   }
 

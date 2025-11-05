@@ -51,7 +51,6 @@ export default function AllocationModal({
       setAllResources(resourcesData || [])
       setExistingAllocations(allocationsData || [])
     } catch (error) {
-      console.error('Erro ao carregar dados:', error)
     } finally {
       setIsLoading(false)
     }
@@ -85,7 +84,6 @@ export default function AllocationModal({
       loadData()
       onSuccess()
     } catch (error: any) {
-      console.error('Erro ao alocar recurso:', error)
       if (error.code === '23505') {
         alert('Esta pessoa já está alocada nesta tarefa')
       } else {
@@ -110,7 +108,6 @@ export default function AllocationModal({
       loadData()
       onSuccess()
     } catch (error) {
-      console.error('Erro ao remover alocação:', error)
       alert('Erro ao remover alocação')
     }
   }

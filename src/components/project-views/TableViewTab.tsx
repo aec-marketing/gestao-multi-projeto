@@ -119,7 +119,7 @@ const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
         .in('task_id', taskIds)
 
       if (error) {
-        console.error('Error loading predecessors:', error)
+        // Error loading predecessors
       } else {
         setPredecessors(data || [])
       }
@@ -228,14 +228,11 @@ async function updateTask(taskId: string, field: string, value: string | number)
 
     if (error) throw error
 
-    console.log('💾 Atualização salva no banco:', updates)
-
     // Check if we need to recalculate dependent tasks (for date/duration changes)
     if (field === 'duration' || field === 'start_date' || field === 'end_date') {
       const cascadeUpdates = recalculateTasksInCascade(taskId, tasks, predecessors)
 
       if (cascadeUpdates.length > 0) {
-        console.log('🔄 Dependências detectadas, abrindo modal de recalculo:', cascadeUpdates)
         setPendingUpdates(cascadeUpdates)
         setShowRecalculateModal(true)
         return // Don't refresh yet, wait for modal
@@ -280,7 +277,6 @@ async function updateTask(taskId: string, field: string, value: string | number)
     // Atualizar lista
     onRefresh()
   } catch (error) {
-    console.error('Erro ao salvar tarefa:', error)
     alert('Erro ao salvar alterações')
   }
 }
@@ -313,7 +309,6 @@ async function createNewTask() {
     setIsAddingTask(false)
     onRefresh()
   } catch (error) {
-    console.error('Erro ao criar tarefa:', error)
     alert('Erro ao criar tarefa')
   }
 }
@@ -393,7 +388,6 @@ async function createNewSubtask(parentTaskId: string, parentType: string) {
     setAddingSubtaskToTask(null)
     onRefresh()
   } catch (error) {
-    console.error('Erro ao criar subtarefa:', error)
     alert('Erro ao criar subtarefa')
   }
 }
@@ -418,10 +412,9 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
       .eq('id', taskId)
 
     if (error) throw error
-    
+
     onRefresh()
   } catch (error) {
-    console.error('Erro ao excluir tarefa:', error)
     alert('Erro ao excluir tarefa')
   }
 }
@@ -436,10 +429,9 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
       .eq('id', subtaskId)
 
     if (error) throw error
-    
+
     onRefresh()
   } catch (error) {
-    console.error('Erro ao excluir subtarefa:', error)
     alert('Erro ao excluir subtarefa')
   }
 }

@@ -153,7 +153,7 @@ function CalendarPageContent() {
       // Carregar eventos pessoais
       await fetchPersonalEvents()
     } catch (error) {
-      console.error('Erro ao carregar dados:', error)
+      // Erro ao carregar dados
     } finally {
       setIsLoading(false)
     }
@@ -173,7 +173,7 @@ function CalendarPageContent() {
 
       setPersonalEvents(data || [])
     } catch (error) {
-      console.error('Erro ao buscar eventos pessoais:', error)
+      // Erro ao buscar eventos pessoais
     }
   }
 
@@ -331,7 +331,6 @@ function CalendarPageContent() {
   function handleTaskClick(event: CalendarEvent) {
     // Redirecionar para página do projeto com tarefa destacada
     // Implementar conforme necessário
-    console.log('Task clicked:', event)
   }
 
   function navigatePeriod(direction: 'prev' | 'next') {
