@@ -115,6 +115,9 @@ export type Database = {
           actual_cost: number
           margin_start: number
           margin_end: number
+          outline_level: number | null
+          wbs_code: string | null
+          is_summary: boolean
           created_at: string
           updated_at: string
         }

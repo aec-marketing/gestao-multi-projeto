@@ -178,7 +178,11 @@ export default function Dashboard() {
             </div>
           </div>
           
-          <ProjectList projects={projects} resources={resources} />
+          <ProjectList
+            projects={projects}
+            resources={resources}
+            onRefresh={loadDashboardData}
+          />
         </div>
 
         {/* Quick Actions */}

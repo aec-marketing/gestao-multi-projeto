@@ -5,14 +5,76 @@ import { Project, Resource } from '@/types/database.types'
 import GanttView from '@/components/GanttView'
 import { formatDateBR } from '@/utils/date.utils'
 import Link from 'next/link'
+import { supabase } from '@/lib/supabase'
 
 interface ProjectListProps {
   projects: Project[]
   resources: Resource[]
+  onRefresh?: () => void
 }
 
-export default function ProjectList({ projects, resources }: ProjectListProps) {
+export default function ProjectList({ projects, resources, onRefresh }: ProjectListProps) {
   const [selectedProjectForGantt, setSelectedProjectForGantt] = useState<string | null>(null)
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
+
+  // Função para excluir projeto (com CASCADE automático no Supabase)
+  async function deleteProject(projectId: string, projectName: string) {
+    // Primeira confirmação: nome do projeto
+    const confirmName = prompt(
+      `⚠️ ATENÇÃO: Esta ação é IRREVERSÍVEL!\n\n` +
+      `Você está prestes a excluir o projeto:\n"${projectName}"\n\n` +
+      `Isso irá excluir PERMANENTEMENTE:\n` +
+      `• Todas as tarefas e subtarefas\n` +
+      `• Todas as alocações de recursos\n` +
+      `• Todos os predecessores\n` +
+      `• Todas as observações e histórico\n\n` +
+      `Para confirmar, digite o nome EXATO do projeto:`
+    )
+
+    if (confirmName !== projectName) {
+      if (confirmName !== null) {
+        alert('❌ Nome incorreto. Exclusão cancelada.')
+      }
+      return
+    }
+
+    // Segunda confirmação: palavra-chave
+    const confirmKeyword = prompt(
+      `⚠️ ÚLTIMA CONFIRMAÇÃO!\n\n` +
+      `Digite "EXCLUIR" (em maiúsculas) para confirmar:`
+    )
+
+    if (confirmKeyword !== 'EXCLUIR') {
+      if (confirmKeyword !== null) {
+        alert('❌ Palavra-chave incorreta. Exclusão cancelada.')
+      }
+      return
+    }
+
+    try {
+      setDeletingProjectId(projectId)
+
+      // Excluir projeto (CASCADE irá excluir automaticamente todos os dados relacionados)
+      const { error } = await supabase
+        .from('projects')
+        .delete()
+        .eq('id', projectId)
+
+      if (error) throw error
+
+      alert(`✅ Projeto "${projectName}" excluído com sucesso!`)
+
+      // Atualizar lista
+      if (onRefresh) {
+        onRefresh()
+      }
+    } catch (error) {
+      console.error('Erro ao excluir projeto:', error)
+      alert('❌ Erro ao excluir projeto: ' + (error as Error).message)
+    } finally {
+      setDeletingProjectId(null)
+    }
+  }
 
   const getLeaderName = (leaderId: string | null) => {
     if (!leaderId) return 'Não atribuído'
@@ -122,22 +184,36 @@ export default function ProjectList({ projects, resources }: ProjectListProps) {
 
               <div className="flex flex-col space-y-2 ml-4">
                 {/* Modal Gantt (antigo) */}
-                <button 
+                <button
                   onClick={() => setSelectedProjectForGantt(project.id)}
                   className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
                 >
                   📊 Gantt (Modal)
                 </button>
-                
+
                 {/* Página Dedicada (NOVO!) */}
                 <Link href={`/projeto/${project.id}`}>
                   <button className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors w-full">
                     🚀 Abrir Página
                   </button>
                 </Link>
-                
+
                 <button className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors">
                   ✏️ Editar
+                </button>
+
+                {/* Botão de Exclusão */}
+                <button
+                  onClick={() => deleteProject(project.id, project.name)}
+                  disabled={deletingProjectId === project.id}
+                  className={`px-3 py-1 text-sm rounded transition-colors ${
+                    deletingProjectId === project.id
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                      : 'bg-red-600 text-white hover:bg-red-700'
+                  }`}
+                  title="Excluir projeto e todos os dados relacionados"
+                >
+                  {deletingProjectId === project.id ? '⏳ Excluindo...' : '🗑️ Excluir'}
                 </button>
               </div>
             </div>

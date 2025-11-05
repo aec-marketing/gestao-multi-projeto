@@ -1,12 +1,13 @@
 'use client'
 
+import React from 'react'
 import { Task } from '@/types/database.types'
 
 interface Predecessor {
   id: string
   task_id: string
   predecessor_id: string
-  type: string // 'fim_inicio', 'inicio_inicio', 'fim_fim'
+  type: string // 'fim_inicio' | 'inicio_inicio' | 'fim_fim'
   lag_time: number
 }
 
@@ -46,13 +47,12 @@ export default function PredecessorLines({
   function parseDate(date: Date | string): Date {
     if (date instanceof Date) return date
 
-    // Se for string no formato YYYY-MM-DD, fazer parse local
     if (typeof date === 'string') {
       const parts = date.split('T')[0].split('-')
       if (parts.length === 3) {
-        const year = parseInt(parts[0])
-        const month = parseInt(parts[1]) - 1 // mês é 0-indexed
-        const day = parseInt(parts[2])
+        const year = parseInt(parts[0], 10)
+        const month = parseInt(parts[1], 10) - 1
+        const day = parseInt(parts[2], 10)
         return new Date(year, month, day)
       }
     }
@@ -65,17 +65,16 @@ export default function PredecessorLines({
     if (!date) return 0
     const dateObj = parseDate(date)
 
-    // Normalizar para início do dia (00:00:00) para comparação precisa
     const normalizedDate = new Date(dateObj)
     normalizedDate.setHours(0, 0, 0, 0)
 
     const normalizedStart = new Date(dateRange.start)
     normalizedStart.setHours(0, 0, 0, 0)
 
-    // Calcular diferença em dias completos
     const days = Math.round((normalizedDate.getTime() - normalizedStart.getTime()) / (1000 * 60 * 60 * 24))
 
-    return days * dayWidth + 320 // +320 para compensar a coluna de nomes (w-80 = 320px)
+    // +320 para compensar a coluna de nomes (w-80 = 320px) — mantenha se for o mesmo layout
+    return days * dayWidth + 320
   }
 
   // ========== NOVO: Criar mapeamento visual de posições ==========
@@ -84,26 +83,26 @@ export default function PredecessorLines({
   let currentRow = 0
 
   // Função recursiva para mapear posições considerando expansão
-  function mapTaskPositions(taskList: Task[], parentId: string | null = null) {
+  function mapTaskPositions(taskList: Task[], parentId: string | null = null, currentLevel: number = 0) {
     const relevantTasks = taskList
       .filter(t => t.parent_id === parentId)
       .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
 
     relevantTasks.forEach(task => {
-      // Mapear posição atual da tarefa
+      // Mapear posição atual da tarefa (centrado na linha)
       taskPositionMap.set(task.id, currentRow * rowHeight + rowHeight / 2)
       currentRow++
 
-      // Se tem subtarefas E está expandida, mapear as subtarefas também
+      // Se tem subtarefas E está expandida → mapear subtarefas recursivamente
       const hasSubtasks = taskList.some(t => t.parent_id === task.id)
       if (hasSubtasks && expandedTasks.has(task.id)) {
-        mapTaskPositions(taskList, task.id)
+        mapTaskPositions(taskList, task.id, currentLevel + 1)
       }
     })
   }
 
-  // Mapear todas as posições começando das tarefas principais
-  mapTaskPositions(tasks, null)
+  // Iniciar mapeamento das tarefas raiz
+  mapTaskPositions(tasks, null, 0)
 
   // Calcula posição Y de uma tarefa usando o mapeamento
   function getTaskY(taskId: string): number {
@@ -112,16 +111,12 @@ export default function PredecessorLines({
   // ========== FIM NOVO ==========
 
   // Calcula a duração visual de uma tarefa (em dias)
-  // IMPORTANTE: Usar a MESMA lógica do calculateTaskDates() no GanttViewTab
   function getTaskDuration(task: Task): number {
     if (!task.start_date || !task.end_date) return task.duration || 1
 
     const start = parseDate(task.start_date)
     const end = parseDate(task.end_date)
 
-    // Usar exatamente a mesma fórmula do componente principal (linha 234 de GanttViewTab)
-    // IMPORTANTE: +1 porque o dia inicial conta
-    // Exemplo: 30/10 a 01/11 = 2 dias de diferença + 1 = 3 dias totais
     const taskDuration = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1)
 
     return taskDuration
@@ -143,31 +138,21 @@ export default function PredecessorLines({
     let x1: number, x2: number
 
     if (type === 'fim_inicio') {
-      // ========== FIM → INÍCIO ==========
-      // x1: fim da barra da tarefa predecessor (usar duração para calcular)
       const fromStart = getDateX(fromTask.start_date)
       const fromDuration = getTaskDuration(fromTask)
       x1 = fromStart + (fromDuration * dayWidth)
 
-      // x2: início da barra da tarefa sucessora
       x2 = getDateX(toTask.start_date)
 
     } else if (type === 'inicio_inicio') {
-      // ========== INÍCIO → INÍCIO ==========
-      // x1: início da barra da tarefa predecessor
       x1 = getDateX(fromTask.start_date)
-
-      // x2: início da barra da tarefa sucessora
       x2 = getDateX(toTask.start_date)
 
     } else {
-      // ========== FIM → FIM ==========
-      // x1: fim da barra da tarefa predecessor (usar duração para calcular)
       const fromStart = getDateX(fromTask.start_date)
       const fromDuration = getTaskDuration(fromTask)
       x1 = fromStart + (fromDuration * dayWidth)
 
-      // x2: fim da barra da tarefa sucessora (usar duração para calcular)
       const toStart = getDateX(toTask.start_date)
       const toDuration = getTaskDuration(toTask)
       x2 = toStart + (toDuration * dayWidth)
@@ -176,25 +161,21 @@ export default function PredecessorLines({
     const y1 = getTaskY(pred.predecessor_id)
     const y2 = getTaskY(pred.task_id)
 
-    // Path com cotovelo suave
     const midX = (x1 + x2) / 2
     const path = `M ${x1},${y1} L ${midX},${y1} L ${midX},${y2} L ${x2},${y2}`
 
-    // Estilo da linha baseado no tipo
     const strokeDasharray =
-      type === 'inicio_inicio' ? '5,5' :  // tracejada
-      type === 'fim_fim' ? '2,2' :         // pontilhada
-      'none'                                // sólida
+      type === 'inicio_inicio' ? '5,5' :
+      type === 'fim_fim' ? '2,2' :
+      'none'
 
-    // Direção da seta baseada na posição relativa
     const arrowDirection = x2 > x1 ? 'right' : 'left'
     const arrowPoints = arrowDirection === 'right'
-      ? `${x2},${y2} ${x2-8},${y2-4} ${x2-8},${y2+4}`  // Seta para direita →
-      : `${x2},${y2} ${x2+8},${y2-4} ${x2+8},${y2+4}`  // Seta para esquerda ←
+      ? `${x2},${y2} ${x2-8},${y2-4} ${x2-8},${y2+4}`
+      : `${x2},${y2} ${x2+8},${y2-4} ${x2+8},${y2+4}`
 
     return (
       <g key={pred.id}>
-        {/* Linha */}
         <path
           d={path}
           stroke={color}
@@ -203,15 +184,11 @@ export default function PredecessorLines({
           fill="none"
           opacity="0.7"
         />
-
-        {/* Seta no final */}
         <polygon
           points={arrowPoints}
           fill={color}
           opacity="0.7"
         />
-
-        {/* Label do tipo de predecessor */}
         <text
           x={midX}
           y={y1 - 5}
@@ -223,8 +200,6 @@ export default function PredecessorLines({
         >
           {typeDisplay[type]}
         </text>
-
-        {/* Tooltip invisível para hover */}
         <title>
           {fromTask.name} → {toTask.name}
           {'\n'}Tipo: {typeDisplay[type]}
@@ -234,7 +209,6 @@ export default function PredecessorLines({
     )
   }
 
-  // Calcular altura total do SVG usando o número de linhas mapeadas
   const totalHeight = currentRow * rowHeight
 
   return (

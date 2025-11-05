@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Project, Task, Resource } from '@/types/database.types'
 import { Allocation } from '@/types/allocation.types'
@@ -144,24 +144,29 @@ const [predecessors, setPredecessors] = useState<any[]>([])
 
     const projectStart = parseLocalDate(project.start_date)!
     if (!projectStart) return []
-    
-    // Separar tarefas principais e subtarefas
-    const mainTasks = tasks.filter(t => !t.parent_id)
-    const subtasksMap = new Map<string, Task[]>()
-    
-    tasks.filter(t => t.parent_id).forEach(subtask => {
-      if (!subtasksMap.has(subtask.parent_id!)) {
-        subtasksMap.set(subtask.parent_id!, [])
-      }
-      subtasksMap.get(subtask.parent_id!)!.push(subtask)
-    })
 
     const result: TaskWithDates[] = []
-    
-    // Processar cada tarefa principal
-    mainTasks.forEach(task => {
-      const subtasks = subtasksMap.get(task.id) || []
-      
+
+    // 🔍 DEBUG: Log de todas as tarefas recebidas
+    console.log('🔍 [calculateTaskDates] Total de tarefas recebidas:', tasks.length)
+    console.log('🔍 [calculateTaskDates] Estrutura de tarefas:', tasks.map(t => ({
+      id: t.id.substring(0, 8),
+      name: t.name,
+      parent_id: t.parent_id?.substring(0, 8) || 'null',
+      outline_level: t.outline_level,
+      wbs_code: t.wbs_code
+    })))
+
+    // ========== NOVA ABORDAGEM: Processar TODAS as tarefas recursivamente ==========
+    // Função recursiva para processar uma tarefa e TODAS as suas subtarefas (qualquer nível)
+    function processTaskRecursively(task: Task, depth: number = 0): void {
+      const indent = '  '.repeat(depth)
+      console.log(`${indent}🔄 Processando: ${task.name} (level=${task.outline_level}, parent=${task.parent_id ? 'sim' : 'não'})`)
+
+      // Pegar TODOS os filhos diretos desta tarefa
+      const directChildren = tasks.filter(t => t.parent_id === task.id)
+      console.log(`${indent}   └─ Encontrados ${directChildren.length} filhos diretos`)
+
       // ═══════════════════════════════════════════════════════════════
       // MODO 1: Tarefa com datas definidas (MS Project ou manual)
       // ═══════════════════════════════════════════════════════════════
@@ -170,157 +175,62 @@ const [predecessors, setPredecessors] = useState<any[]>([])
         let taskEndDate = parseLocalDate(task.end_date)
         if (!taskStartDate || !taskEndDate) return
 
-        // Processar subtarefas primeiro para encontrar o intervalo real
-        const processedSubtasks: TaskWithDates[] = []
-        subtasks.forEach(subtask => {
-          if (subtask.start_date && subtask.end_date) {
-            // Subtarefa com datas definidas (do MS Project)
-            const subStart = parseLocalDate(subtask.start_date)
-            const subEnd = parseLocalDate(subtask.end_date)
-            if (!subStart || !subEnd) return
+        // RECURSÃO: Processar TODOS os filhos primeiro (em qualquer nível)
+        directChildren.forEach(child => processTaskRecursively(child, depth + 1))
 
-            // Calcular duração REAL baseada nas datas
-            // IMPORTANTE: +1 porque o dia inicial conta
-            // Exemplo: 30/10 a 01/11 = 2 dias de diferença + 1 = 3 dias totais
-            const realDuration = Math.max(1, Math.ceil((subEnd.getTime() - subStart.getTime()) / (1000 * 60 * 60 * 24)) + 1)
-
-            processedSubtasks.push({
-              ...subtask,
-              start_date: subStart,
-              end_date: subEnd,
-              duration_days: realDuration
-            })
-          } else {
-            // Subtarefa sem datas - usar início da tarefa pai
-            if (!taskStartDate) return
-            const subtaskStart = new Date(taskStartDate)
-            const subtaskDuration = Math.ceil(subtask.duration)
-            const subtaskEnd = new Date(subtaskStart)
-            subtaskEnd.setDate(subtaskEnd.getDate() + subtaskDuration - 1)
-
-            processedSubtasks.push({
-              ...subtask,
-              start_date: subtaskStart,
-              end_date: subtaskEnd,
-              duration_days: subtaskDuration
-            })
-          }
-        })
-
-        // Se há subtarefas com datas, calcular início/fim baseado nelas + margens
-        if (processedSubtasks.length > 0) {
-          const earliestSubtaskStart = processedSubtasks.reduce((earliest, sub) => {
-            return sub.start_date < earliest ? sub.start_date : earliest
-          }, processedSubtasks[0].start_date)
-
-          const latestSubtaskEnd = processedSubtasks.reduce((latest, sub) => {
-            return sub.end_date > latest ? sub.end_date : latest
-          }, processedSubtasks[0].end_date)
-
-          // Aplicar margens (folga antes e depois das subtarefas)
-          const marginStart = task.margin_start || 0
-          const marginEnd = task.margin_end || 0
-
-          // Calcular datas da tarefa principal com margens
-          taskStartDate = new Date(earliestSubtaskStart)
-          taskStartDate.setDate(taskStartDate.getDate() - Math.ceil(marginStart))
-
-          taskEndDate = new Date(latestSubtaskEnd)
-          taskEndDate.setDate(taskEndDate.getDate() + Math.ceil(marginEnd))
-        }
-
-        // Calcular duração real incluindo gaps e margens
-        // IMPORTANTE: +1 porque o dia inicial conta
+        // Calcular duração REAL baseada nas datas
         const taskDuration = Math.max(1, Math.ceil((taskEndDate.getTime() - taskStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1)
 
-        // Adicionar tarefa principal
+        // Adicionar esta tarefa ao resultado
         result.push({
           ...task,
           start_date: taskStartDate,
           end_date: taskEndDate,
           duration_days: taskDuration
         })
-
-        // Adicionar subtarefas processadas
-        processedSubtasks.forEach(subtask => result.push(subtask))
-        
-      } 
+        console.log(`${indent}   ✅ Adicionado ao result (total: ${result.length})`)
+      }
       // ═══════════════════════════════════════════════════════════════
       // MODO 2: Tarefa SEM datas - calcular usando data do projeto
       // ═══════════════════════════════════════════════════════════════
       else {
         const startDate = new Date(projectStart)
-        let taskDuration: number
-        let endDate: Date
+        const taskDuration = Math.ceil(task.duration)
+        const endDate = new Date(startDate)
+        endDate.setDate(endDate.getDate() + taskDuration - 1)
 
-        if (subtasks.length > 0) {
-          // Processar subtarefas sequencialmente
-          const processedSubtasks: TaskWithDates[] = []
+        // RECURSÃO: Processar TODOS os filhos (em qualquer nível)
+        directChildren.forEach(child => processTaskRecursively(child, depth + 1))
 
-          // Aplicar margem de início
-          const marginStart = task.margin_start || 0
-          const marginEnd = task.margin_end || 0
-
-          let subtaskCurrentDate = new Date(startDate)
-          subtaskCurrentDate.setDate(subtaskCurrentDate.getDate() + Math.ceil(marginStart))
-
-          subtasks.forEach(subtask => {
-            const subtaskStart = new Date(subtaskCurrentDate)
-            const subtaskDuration = Math.ceil(subtask.duration)
-            const subtaskEnd = new Date(subtaskStart)
-            subtaskEnd.setDate(subtaskEnd.getDate() + subtaskDuration - 1)
-
-            processedSubtasks.push({
-              ...subtask,
-              start_date: subtaskStart,
-              end_date: subtaskEnd,
-              duration_days: subtaskDuration
-            })
-
-            subtaskCurrentDate = new Date(subtaskEnd)
-            subtaskCurrentDate.setDate(subtaskCurrentDate.getDate() + 1)
-          })
-
-          // Calcular intervalo real da tarefa pai baseado nas subtarefas + margens
-          const firstSubtaskStart = processedSubtasks[0].start_date
-          const lastSubtaskEnd = processedSubtasks[processedSubtasks.length - 1].end_date
-
-          // Data de início da tarefa = início da primeira subtarefa - margem
-          const taskStartWithMargin = new Date(firstSubtaskStart)
-          taskStartWithMargin.setDate(taskStartWithMargin.getDate() - Math.ceil(marginStart))
-
-          // Data de fim da tarefa = fim da última subtarefa + margem
-          const taskEndWithMargin = new Date(lastSubtaskEnd)
-          taskEndWithMargin.setDate(taskEndWithMargin.getDate() + Math.ceil(marginEnd))
-
-          // Duração = diferença entre primeiro início e último fim (incluindo gaps e margens)
-          taskDuration = Math.floor((taskEndWithMargin.getTime() - taskStartWithMargin.getTime()) / (1000 * 60 * 60 * 24)) + 1
-          endDate = taskEndWithMargin
-
-          // Adicionar subtarefas processadas
-          processedSubtasks.forEach(subtask => result.push(subtask))
-        } else {
-          // Sem subtarefas
-          taskDuration = Math.ceil(task.duration)
-          endDate = new Date(startDate)
-          endDate.setDate(endDate.getDate() + taskDuration - 1)
-        }
-        
-        // Adicionar tarefa principal
+        // Adicionar esta tarefa ao resultado
         result.push({
           ...task,
           start_date: startDate,
           end_date: endDate,
           duration_days: taskDuration
         })
+        console.log(`${indent}   ✅ Adicionado ao result (total: ${result.length})`)
       }
-    })
-    
+    }
+
+    // Iniciar processamento pelas tarefas raiz (sem parent_id)
+    const rootTasks = tasks.filter(t => !t.parent_id)
+    console.log('🌳 [calculateTaskDates] Tarefas raiz encontradas:', rootTasks.length)
+    rootTasks.forEach(rootTask => processTaskRecursively(rootTask, 0))
+
+    console.log('✅ [calculateTaskDates] Total de tarefas processadas:', result.length)
+    console.log('📊 [calculateTaskDates] Resultado final:', result.map(t => ({
+      name: t.name,
+      parent_id: tasks.find(orig => orig.id === t.id)?.parent_id?.substring(0, 8) || 'null'
+    })))
+
     return result
   }
 
   // Organizar tarefas em hierarquia (pais e filhos)
   function organizeTasksHierarchy(tasksWithDates: TaskWithDates[]): TaskWithAllocations[] {
+    console.log('🏗️ [organizeTasksHierarchy] Iniciando organização de', tasksWithDates.length, 'tarefas')
+
     const taskMap = new Map<string, TaskWithAllocations>()
     const rootTasks: TaskWithAllocations[] = []
 
@@ -344,6 +254,8 @@ const [predecessors, setPredecessors] = useState<any[]>([])
       taskMap.set(task.id, taskWithAllocs)
     })
 
+    console.log('📦 [organizeTasksHierarchy] Criadas', taskMap.size, 'tarefas no mapa')
+
     // Depois, organizar hierarquia
     taskMap.forEach(task => {
       if (task.parent_id) {
@@ -351,10 +263,28 @@ const [predecessors, setPredecessors] = useState<any[]>([])
         if (parent) {
           parent.subtasks = parent.subtasks || []
           parent.subtasks.push(task)
+          console.log(`   🔗 "${task.name}" → adicionado como filho de "${parent.name}"`)
+        } else {
+          console.warn(`   ⚠️ Parent não encontrado para "${task.name}" (parent_id: ${task.parent_id})`)
         }
       } else {
         rootTasks.push(task)
       }
+    })
+
+    console.log('🌳 [organizeTasksHierarchy] Total de tarefas raiz:', rootTasks.length)
+    console.log('📊 [organizeTasksHierarchy] Estrutura da hierarquia:')
+    rootTasks.forEach(root => {
+      console.log(`   └─ ${root.name} (${root.subtasks?.length || 0} filhos diretos)`)
+      root.subtasks?.forEach(child => {
+        console.log(`      └─ ${child.name} (${child.subtasks?.length || 0} filhos diretos)`)
+        child.subtasks?.forEach(grandchild => {
+          console.log(`         └─ ${grandchild.name} (${grandchild.subtasks?.length || 0} filhos diretos)`)
+          grandchild.subtasks?.forEach(greatgrandchild => {
+            console.log(`            └─ ${greatgrandchild.name}`)
+          })
+        })
+      })
     })
 
     return rootTasks
@@ -390,12 +320,41 @@ const [predecessors, setPredecessors] = useState<any[]>([])
     }
   }
 
-  // Incluir subtarefas das tarefas filtradas
+  // 🔥 NOVO: Incluir TODAS as subtarefas (recursivamente) das tarefas filtradas
   const filteredTaskIds = new Set(filteredTasksWithDates.map(t => t.id))
-  const subtasksOfFiltered = tasksWithDates.filter(t => t.parent_id && filteredTaskIds.has(t.parent_id))
-  const finalFilteredTasks = [...filteredTasksWithDates, ...subtasksOfFiltered]
+
+  // Função recursiva para pegar TODOS os descendentes (não apenas filhos diretos)
+  function getAllDescendants(parentIds: Set<string>): TaskWithDates[] {
+    const descendants: TaskWithDates[] = []
+    const directChildren = tasksWithDates.filter(t => t.parent_id && parentIds.has(t.parent_id))
+
+    if (directChildren.length === 0) return descendants
+
+    descendants.push(...directChildren)
+
+    // Recursivamente pegar descendentes dos filhos
+    const childIds = new Set(directChildren.map(c => c.id))
+    const grandchildren = getAllDescendants(childIds)
+    descendants.push(...grandchildren)
+
+    return descendants
+  }
+
+  const allDescendants = getAllDescendants(filteredTaskIds)
+  const finalFilteredTasks = [...filteredTasksWithDates, ...allDescendants]
+
+  console.log('🔍 [FILTROS] Tarefas principais filtradas:', filteredTasksWithDates.length)
+  console.log('🔍 [FILTROS] Descendentes encontrados (todos os níveis):', allDescendants.length)
+  console.log('🔍 [FILTROS] Total final:', finalFilteredTasks.length)
 
   const organizedTasks = organizeTasksHierarchy(finalFilteredTasks)
+
+  console.log('🎨 [RENDER] organizedTasks para renderização:', organizedTasks.length)
+  console.log('🎨 [RENDER] Estrutura final que será renderizada:', organizedTasks.map(t => ({
+    name: t.name,
+    subtasks_count: t.subtasks?.length || 0,
+    isExpanded: t.isExpanded
+  })))
 
   // Criar grid de datas
   const allDates = tasksWithDates.flatMap(t => [t.start_date, t.end_date])
@@ -1051,43 +1010,55 @@ useEffect(() => {
     document.removeEventListener('mouseup', handleMouseUp)
   }
 }, [resizingTask, tasks])
-  // Renderizar tarefas recursivamente
-  const renderTask = (task: TaskWithAllocations, level = 0, parentTask?: TaskWithAllocations) => {
-    const isSubtask = level > 0
-    const hasSubtasks = (task.subtasks?.length || 0) > 0
+  // Função recursiva para renderizar tarefas em QUALQUER nível
+  const renderTaskRecursive = (
+    task: TaskWithAllocations,
+    level: number = 0,
+    parentTask?: TaskWithAllocations
+  ): JSX.Element => {
+    const isSubtask = !!task.parent_id
+    const hasSubtasks = task.subtasks && task.subtasks.length > 0
     const isExpanded = task.isExpanded
-    const isDelayed = isSubtask ? isSubtaskDelayed(task, parentTask) : false
+
+    // Calcular indentação baseado no outline_level (mais preciso) ou level
+    const indentLevel = task.outline_level || level
+    const indent = indentLevel * 20 // 20px por nível
+
+    // Detectar atraso (se for subtarefa)
+    const isDelayed = isSubtask && parentTask
+      ? isSubtaskDelayed(task, parentTask)
+      : false
 
     const taskElement = (
       <div
-  key={task.id}
-  className={`flex border-b hover:bg-gray-50 transition-colors ${
-    draggedTask === task.id ? 'dragging-row' : ''
-  } ${dragOverTask === task.id ? 'drag-over-row' : ''}`}
-  onDragOver={(e) => {
-    if (!isSubtask && draggedTask && draggedTask !== task.id) {
-      e.preventDefault()
-      e.dataTransfer.dropEffect = 'move'
-      setDragOverTask(task.id)
-    }
-  }}
-  onDragLeave={() => {
-    setDragOverTask(null)
-  }}
-  onDrop={async (e) => {
-    e.preventDefault()
-    if (!isSubtask && draggedTask && dragOverTask) {
-      await handleReorderTasks(draggedTask, dragOverTask)
-    }
-    setDraggedTask(null)
-    setDragOverTask(null)
-  }}
->
-  {/* Coluna de nome da tarefa */}
-  <div
-    className="w-80 px-4 py-3 border-r flex items-center justify-between"
-    style={{ paddingLeft: `${level * 24 + 16}px` }}
-  >
+        key={task.id}
+        className={`flex border-b hover:bg-gray-50 transition-colors ${
+          draggedTask === task.id ? 'dragging-row' : ''
+        } ${dragOverTask === task.id ? 'drag-over-row' : ''}`}
+        onDragOver={(e) => {
+          if (!isSubtask && draggedTask && draggedTask !== task.id) {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            setDragOverTask(task.id)
+          }
+        }}
+        onDragLeave={() => {
+          setDragOverTask(null)
+        }}
+        onDrop={async (e) => {
+          e.preventDefault()
+          if (!isSubtask && draggedTask && dragOverTask) {
+            await handleReorderTasks(draggedTask, dragOverTask)
+          }
+          setDraggedTask(null)
+          setDragOverTask(null)
+        }}
+      >
+        {/* Coluna de nome da tarefa */}
+        <div
+          className="w-80 px-4 py-3 border-r flex items-center justify-between"
+          style={{ paddingLeft: `${16 + indent}px` }} // Indentação dinâmica
+        >
           <div className="flex items-center space-x-2 flex-1 min-w-0">
             {/* Alça de arrasto (drag handle) - apenas para tarefas principais */}
             {!isSubtask && (
@@ -1107,6 +1078,8 @@ useEffect(() => {
                 ⋮⋮
               </div>
             )}
+
+            {/* Botão Expand/Collapse */}
             {hasSubtasks && (
               <button
                 onClick={() => toggleTaskExpansion(task.id)}
@@ -1115,38 +1088,53 @@ useEffect(() => {
                 {isExpanded ? '▼' : '▶'}
               </button>
             )}
+
             {!hasSubtasks && isSubtask && (
               <span className="text-gray-400 flex-shrink-0">└</span>
             )}
+
+            {/* WBS Code (se disponível) */}
+            {task.wbs_code && (
+              <span className="text-xs text-gray-500 font-mono flex-shrink-0">
+                {task.wbs_code}
+              </span>
+            )}
+
+            {/* Nome da Tarefa */}
             <div className="flex-1 min-w-0">
-              <div className="text-sm text-gray-900 truncate font-medium">
+              <div
+                className={`text-sm truncate cursor-pointer ${
+                  isSubtask ? 'text-gray-700' : 'font-semibold text-gray-900'
+                }`}
+                onClick={() => setSelectedTask(task.id)}
+                title={task.name}
+              >
                 {task.name}
               </div>
               <div className="text-xs text-gray-500">
                 {task.duration_days}d • {task.progress}%
-                      {/* ADICIONE ESTAS LINHAS - Badges de pessoas alocadas */}
-        {task.allocations && task.allocations.length > 0 && (
-          <div className="flex gap-1 ml-2">
-            {task.allocations.slice(0, 2).map(alloc => (
-              <span
-                key={alloc.id}
-                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 font-medium"
-                title={`${alloc.resource?.name} (${alloc.priority})`}
-              >
-                👤 {alloc.resource?.name?.split(' ')[0]}
-              </span>
-            ))}
-            {task.allocations.length > 2 && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-600">
-                +{task.allocations.length - 2}
-              </span>
-            )}
+                {/* Badges de pessoas alocadas */}
+                {task.allocations && task.allocations.length > 0 && (
+                  <div className="flex gap-1 ml-2">
+                    {task.allocations.slice(0, 2).map(alloc => (
+                      <span
+                        key={alloc.id}
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 font-medium"
+                        title={`${alloc.resource?.name} (${alloc.priority})`}
+                      >
+                        👤 {alloc.resource?.name?.split(' ')[0]}
+                      </span>
+                    ))}
+                    {task.allocations.length > 2 && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-600">
+                        +{task.allocations.length - 2}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        )}
-      </div>
-    </div>
-  </div>
-
 
           <div className="flex items-center space-x-1 ml-2 flex-shrink-0">
             {!isSubtask && (
@@ -1198,7 +1186,7 @@ useEffect(() => {
           {(() => {
             const barStyle = getTaskBarStyle(task)
             const leftPx = parseInt(barStyle.left as string) || 0
-            
+
             if (leftPx > 0) {
               return (
                 <div
@@ -1206,7 +1194,7 @@ useEffect(() => {
                   style={{
                     left: '0px',
                     width: `${leftPx}px`,
-                    backgroundColor: isSubtask 
+                    backgroundColor: isSubtask
                       ? 'rgba(156, 163, 175, 0.3)'
                       : 'rgba(239, 68, 68, 0.4)'
                   }}
@@ -1297,13 +1285,15 @@ useEffect(() => {
       </div>
     )
 
-    // Se tem subtarefas e está expandido, renderizar subtarefas
+    // SE tem subtarefas E está expandido → renderizar recursivamente
     if (hasSubtasks && isExpanded) {
       return (
-        <div key={task.id}>
+        <React.Fragment key={task.id}>
           {taskElement}
-          {task.subtasks?.map(subtask => renderTask(subtask, level + 1, task))}
-        </div>
+          {task.subtasks!.map(subtask =>
+            renderTaskRecursive(subtask, level + 1, task)
+          )}
+        </React.Fragment>
       )
     }
 
@@ -1508,7 +1498,7 @@ useEffect(() => {
             {/* ========== NOVO: Container de linhas com overlay SVG ========== */}
             <div className="relative">
               {/* Linhas de tarefas */}
-              {organizedTasks.map((task) => renderTask(task, 0))}
+              {organizedTasks.map((task) => renderTaskRecursive(task, 0))}
 
               {/* Linhas de Predecessores - overlay absoluto */}
               <PredecessorLines
