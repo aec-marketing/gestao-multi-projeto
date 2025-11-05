@@ -127,7 +127,6 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
           .insert(allocationsToInsert)
 
         if (allocError) {
-          console.warn('Aviso: Não foi possível copiar alocações de líderes:', allocError)
           // Não falhar a criação da subtarefa por causa disso
         }
       }
@@ -136,7 +135,6 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
       setSubtaskDuration('1')
       onSuccess()
     } catch (error) {
-      console.error('Erro ao criar subtarefa:', error)
       alert('Erro ao criar subtarefa')
     } finally {
       setIsCreating(false)

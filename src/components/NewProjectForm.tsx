@@ -200,7 +200,6 @@ export default function NewProjectForm({ onClose, onSuccess }: NewProjectFormPro
 
       onSuccess()
     } catch (error) {
-      console.error('Erro ao criar projeto:', error)
       setErrors({ submit: 'Erro ao criar projeto. Tente novamente.' })
     } finally {
       setIsLoading(false)

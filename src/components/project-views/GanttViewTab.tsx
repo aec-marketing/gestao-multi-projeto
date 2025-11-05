@@ -505,7 +505,6 @@ const [predecessors, setPredecessors] = useState<any[]>([])
       if (error) throw error
       onRefresh()
     } catch (error) {
-      console.error('Erro ao excluir subtarefa:', error)
       alert('Erro ao excluir subtarefa')
     }
   }
@@ -539,7 +538,6 @@ async function handleReorderTasks(draggedId: string, targetId: string) {
     // Atualizar localmente
     onRefresh()
   } catch (error) {
-    console.error('Erro ao reordenar tarefas:', error)
     alert('Erro ao reordenar tarefas')
   }
 }
@@ -695,7 +693,6 @@ async function updateTaskDuration(taskId: string, newDuration: number, edge: 'st
       .order('sort_order')
 
     if (fetchError) {
-      console.error('Erro ao buscar tarefas atualizadas:', fetchError)
       onRefresh()
       return
     }
@@ -705,8 +702,6 @@ async function updateTaskDuration(taskId: string, newDuration: number, edge: 'st
       updatedTasks || tasks, // Usar dados atualizados do banco
       predecessors
     )
-
-    console.log('🔄 Updates de recálculo gerados:', updates.length)
 
     if (updates.length > 0) {
       // Há tarefas dependentes que precisam ser recalculadas
@@ -719,7 +714,6 @@ async function updateTaskDuration(taskId: string, newDuration: number, edge: 'st
     // ========== FIM NOVO ==========
 
   } catch (error) {
-    console.error('Erro ao atualizar duração:', error)
     alert('Erro ao atualizar duração')
   }
 }
@@ -761,17 +755,12 @@ async function loadPredecessors() {
 
 // ========== NOVO: Função para calcular datas iniciais ==========
 async function calculateInitialDates(predecessorData: any[]) {
-  console.log('🔄 Verificando tarefas sem data que têm predecessores...')
-
   // Encontrar tarefas sem start_date que têm predecessores
   const tasksWithoutDates = tasks.filter(t => !t.start_date && predecessorData.some(p => p.task_id === t.id))
 
   if (tasksWithoutDates.length === 0) {
-    console.log('✅ Todas as tarefas com predecessores já têm datas')
     return
   }
-
-  console.log(`📋 Encontradas ${tasksWithoutDates.length} tarefa(s) sem data:`, tasksWithoutDates.map(t => t.name))
 
   // Para cada tarefa sem data, calcular baseado nos predecessores
   const updates = []
@@ -800,11 +789,10 @@ async function calculateInitialDates(predecessorData: any[]) {
             reason: `Data inicial calculada baseada no predecessor "${predecessorTask.name}"`
           })
 
-          console.log(`✅ Calculada data para "${task.name}": ${newDates.start_date.toISOString().split('T')[0]}`)
           break // Usar apenas o primeiro predecessor para cálculo inicial
 
         } catch (error) {
-          console.error(`❌ Erro ao calcular data para "${task.name}":`, error)
+          // Erro ao calcular data - ignorar
         }
       }
     }
@@ -812,8 +800,6 @@ async function calculateInitialDates(predecessorData: any[]) {
 
   // Se há updates, aplicar diretamente ou mostrar modal
   if (updates.length > 0) {
-    console.log(`💾 Aplicando ${updates.length} data(s) inicial(is)...`)
-
     const { calculateDurationFromDates } = await import('@/utils/taskDateSync')
 
     for (const update of updates) {
@@ -833,7 +819,6 @@ async function calculateInitialDates(predecessorData: any[]) {
         .eq('id', update.id)
     }
 
-    console.log('✅ Datas iniciais aplicadas com sucesso')
     onRefresh() // Recarregar para mostrar as mudanças
   }
 }
@@ -841,8 +826,6 @@ async function calculateInitialDates(predecessorData: any[]) {
 
 // ========== FUNÇÃO DE AUDITORIA DE CONFLITOS ==========
 async function handleAuditConflicts() {
-  console.log('🔍 Iniciando auditoria de conflitos...')
-
   try {
     // Buscar dados atualizados do banco
     const { data: allTasks, error: tasksError } = await supabase
@@ -857,13 +840,11 @@ async function handleAuditConflicts() {
       .in('task_id', tasks.map(t => t.id))
 
     if (tasksError || predsError) {
-      console.error('Erro ao buscar dados:', tasksError || predsError)
       alert('Erro ao buscar dados para auditoria')
       return
     }
 
     if (!allTasks || !allPredecessors) {
-      console.log('Sem dados para auditar')
       onRefresh()
       return
     }
@@ -877,12 +858,10 @@ async function handleAuditConflicts() {
       onRefresh()
     } else {
       // Conflitos encontrados - mostrar modal de recálculo
-      console.log(`⚠️ ${conflicts.length} conflito(s) encontrado(s)`)
       setPendingUpdates(conflicts)
       setShowRecalculateModal(true)
     }
   } catch (error) {
-    console.error('Erro ao auditar conflitos:', error)
     alert('Erro ao auditar conflitos: ' + (error as Error).message)
   }
 }
@@ -1620,7 +1599,6 @@ useEffect(() => {
                     .eq('id', editingCostsTask.id)
 
                   if (error) {
-                    console.error('Erro ao salvar custos:', error)
                     alert('Erro ao salvar custos')
                   } else {
                     setEditingCostsTask(null)

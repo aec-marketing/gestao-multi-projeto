@@ -75,7 +75,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
       setResources(resourcesData || [])
       setAllocations(allocationsData || [])
     } catch (error) {
-      console.error('Erro ao carregar dados do projeto:', error)
+      // Erro ao carregar dados do projeto
     } finally {
       setIsLoading(false)
     }
@@ -358,21 +358,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
     // Calcular em pixels absolutos
     const leftPixels = daysSinceStart * pixelsPerDay
     const widthPixels = Math.max(duration * pixelsPerDay, 40)  // Mínimo 40px
-    
-    // Debug: Log para primeira tarefa
-    if (task.name === 'PROJETO MECÂNICO') {
-      console.log('📊 DEBUG GANTT (PIXELS):', {
-        task: task.name,
-        duration: duration,
-        daysSinceStart,
-        pixelsPerDay,
-        leftPixels: `${leftPixels}px`,
-        widthPixels: `${widthPixels}px`,
-        totalProjectDays,
-        dateGridLength: dateGrid.length
-      })
-    }
-    
+
     return {
       left: `${leftPixels}px`,
       width: `${widthPixels}px`
@@ -417,10 +403,10 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
         .from('tasks')
         .update({ progress })
         .eq('id', taskId)
-      
+
       loadProjectData()
     } catch (error) {
-      console.error('Erro ao atualizar progresso:', error)
+      // Erro ao atualizar progresso
     }
   }
 
@@ -437,7 +423,6 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
 
       loadProjectData()
     } catch (error) {
-      console.error('Erro ao excluir subtarefa:', error)
       alert('Erro ao excluir subtarefa')
     }
   }
@@ -500,7 +485,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
 
       loadProjectData()
     } catch (error) {
-      console.error('Erro ao reordenar tarefas:', error)
+      // Erro ao reordenar tarefas
     } finally {
       setDraggedTask(null)
       setDragOverTask(null)
@@ -942,7 +927,6 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
                     .eq('id', editingCostsTask.id)
 
                   if (error) {
-                    console.error('Erro ao salvar custos:', error)
                     alert('Erro ao salvar custos')
                   } else {
                     setEditingCostsTask(null)

@@ -27,7 +27,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json(preview)
   } catch (error) {
-    console.error('Erro ao processar XML:', error)
     return NextResponse.json(
       { 
         error: error instanceof Error 

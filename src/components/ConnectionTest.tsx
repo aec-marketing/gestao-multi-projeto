@@ -13,7 +13,6 @@ export default function ConnectionTest() {
   useEffect(() => {
     async function testConnection() {
       try {
-        console.log('🔄 Testando conexão com Supabase...')
         
         // Testar busca de projetos
         const { data: projectsData, error: projectsError } = await supabase
@@ -22,10 +21,8 @@ export default function ConnectionTest() {
           .order('created_at', { ascending: false })
         
         if (projectsError) {
-          console.error('❌ Erro ao buscar projetos:', projectsError)
           setError(`Erro projetos: ${projectsError.message}`)
         } else {
-          console.log('✅ Projetos carregados:', projectsData?.length || 0)
           setProjects(projectsData || [])
         }
 
@@ -36,15 +33,12 @@ export default function ConnectionTest() {
           .order('role', { ascending: true })
 
         if (resourcesError) {
-          console.error('❌ Erro ao buscar recursos:', resourcesError)
           setError(`Erro recursos: ${resourcesError.message}`)
         } else {
-          console.log('✅ Recursos carregados:', resourcesData?.length || 0)
           setResources(resourcesData || [])
         }
 
       } catch (err) {
-        console.error('❌ Erro geral:', err)
         setError(`Erro geral: ${err}`)
       } finally {
         setIsLoading(false)

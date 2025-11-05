@@ -94,11 +94,8 @@ export async function importMSProject(
       .single()
 
     if (projectError) {
-      console.error('Erro ao criar projeto:', projectError)
       throw new Error(`Erro ao criar projeto: ${projectError.message}`)
     }
-
-    console.log('✅ Projeto criado:', project.id)
 
     // ========== 2. CRIAR MAPA DE OUTLINENUMBER → TASK_ID ==========
     // Precisamos disso para calcular parent_id depois
@@ -153,7 +150,6 @@ export async function importMSProject(
         .single()
 
       if (taskError) {
-        console.error('Erro ao criar tarefa:', task.name, taskError)
         // Rollback: deletar projeto
         await supabase.from('projects').delete().eq('id', project.id)
         throw new Error(`Erro ao criar tarefa "${task.name}": ${taskError.message}`)
@@ -163,11 +159,7 @@ export async function importMSProject(
       outlineToIdMap.set(task.outlineNumber, insertedTask.id)
       uidToIdMap.set(task.uid, insertedTask.id)
       tasksCreated++
-
-      console.log(`✅ Tarefa ${task.outlineNumber} criada: ${task.name}`)
     }
-
-    console.log(`✅ Total de tarefas criadas: ${tasksCreated}`)
 
     // ========== 4. INSERIR PREDECESSORES ==========
     let predecessorsCreated = 0
@@ -177,14 +169,12 @@ export async function importMSProject(
 
       const taskId = uidToIdMap.get(task.uid)
       if (!taskId) {
-        console.warn(`⚠️ Task UID ${task.uid} não encontrada no mapa`)
         continue
       }
 
       for (const pred of task.predecessors) {
         const predecessorId = uidToIdMap.get(pred.uid)
         if (!predecessorId) {
-          console.warn(`⚠️ Predecessor UID ${pred.uid} não encontrado`)
           continue
         }
 
@@ -198,15 +188,12 @@ export async function importMSProject(
           })
 
         if (predError) {
-          console.error('Erro ao criar predecessor:', predError)
           // Não fazer rollback aqui, predecessores são opcionais
         } else {
           predecessorsCreated++
         }
       }
     }
-
-    console.log(`✅ Total de predecessores criados: ${predecessorsCreated}`)
 
     // ========== 5. RETORNAR RESULTADO ==========
     return {
@@ -216,7 +203,6 @@ export async function importMSProject(
     }
 
   } catch (error) {
-    console.error('❌ Erro durante importação:', error)
     throw error
   }
 }

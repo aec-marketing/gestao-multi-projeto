@@ -119,7 +119,7 @@ export default function TableViewTab({
         .in('task_id', taskIds)
 
       if (error) {
-        console.error('Error loading predecessors:', error)
+        // Error loading predecessors
       } else {
         setPredecessors(data || [])
       }
@@ -267,6 +267,7 @@ export default function TableViewTab({
               const newParentEndDate = new Date(parentTask.start_date)
               newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
 
+<<<<<<< HEAD
               await supabase
                 .from('tasks')
                 .update({
@@ -280,6 +281,50 @@ export default function TableViewTab({
                 .update({ duration: maxSubtaskDuration })
                 .eq('id', parentTask.id)
             }
+=======
+    if (error) throw error
+
+    // Check if we need to recalculate dependent tasks (for date/duration changes)
+    if (field === 'duration' || field === 'start_date' || field === 'end_date') {
+      const cascadeUpdates = recalculateTasksInCascade(taskId, tasks, predecessors)
+
+      if (cascadeUpdates.length > 0) {
+        setPendingUpdates(cascadeUpdates)
+        setShowRecalculateModal(true)
+        return // Don't refresh yet, wait for modal
+      }
+    }
+
+    // ========== AJUSTE DE DURAÇÃO DA TAREFA PAI ==========
+    // Se editou duração de uma subtarefa, verificar se tarefa pai precisa se ajustar
+    const updatedTask = tasks.find(t => t.id === taskId)
+    if (updatedTask?.parent_id && field === 'duration') {
+      const parentTask = tasks.find(t => t.id === updatedTask.parent_id)
+      if (parentTask) {
+        const siblings = tasks.filter(t => t.parent_id === parentTask.id)
+        const maxSubtaskDuration = Math.max(
+          ...siblings.map(s => s.id === taskId ? parseFloat(value as string) : s.duration || 0)
+        )
+
+        if (maxSubtaskDuration > (parentTask.duration || 0)) {
+          // Atualizar duração da tarefa pai
+          if (parentTask.start_date) {
+            const newParentEndDate = new Date(parentTask.start_date)
+            newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
+
+            await supabase
+              .from('tasks')
+              .update({
+                duration: maxSubtaskDuration,
+                end_date: newParentEndDate.toISOString().split('T')[0]
+              })
+              .eq('id', parentTask.id)
+          } else {
+            await supabase
+              .from('tasks')
+              .update({ duration: maxSubtaskDuration })
+              .eq('id', parentTask.id)
+>>>>>>> 5199bc6aab472bbed79021a2a1ad524ab1316416
           }
         }
       }
@@ -291,6 +336,21 @@ export default function TableViewTab({
       console.error('Erro ao salvar tarefa:', error)
       alert('Erro ao salvar alterações')
     }
+<<<<<<< HEAD
+=======
+    // ========== FIM AJUSTE ==========
+
+    // Atualizar lista
+    onRefresh()
+  } catch (error) {
+    alert('Erro ao salvar alterações')
+  }
+}
+async function createNewTask() {
+  if (!newTaskData.name.trim()) {
+    alert('Nome da tarefa é obrigatório')
+    return
+>>>>>>> 5199bc6aab472bbed79021a2a1ad524ab1316416
   }
 
   // Adapter para o novo componente recursivo que espera onUpdate(taskId, Partial<Task>)
@@ -339,6 +399,23 @@ export default function TableViewTab({
   function cancelNewTask() {
     setNewTaskData({ name: '', type: 'projeto_mecanico', duration: 1 })
     setIsAddingTask(false)
+<<<<<<< HEAD
+=======
+    onRefresh()
+  } catch (error) {
+    alert('Erro ao criar tarefa')
+  }
+}
+
+function cancelNewTask() {
+  setNewTaskData({ name: '', type: 'projeto_mecanico', duration: 1 })
+  setIsAddingTask(false)
+}
+async function createNewSubtask(parentTaskId: string, parentType: string) {
+  if (!newSubtaskData.name.trim()) {
+    alert('Nome da subtarefa é obrigatório')
+    return
+>>>>>>> 5199bc6aab472bbed79021a2a1ad524ab1316416
   }
 
   async function createNewSubtask(parentTaskId: string, parentType: string) {
@@ -420,6 +497,26 @@ export default function TableViewTab({
   function cancelNewSubtask() {
     setNewSubtaskData({ name: '', duration: 1 })
     setAddingSubtaskToTask(null)
+<<<<<<< HEAD
+=======
+    onRefresh()
+  } catch (error) {
+    alert('Erro ao criar subtarefa')
+  }
+}
+
+function cancelNewSubtask() {
+  setNewSubtaskData({ name: '', duration: 1 })
+  setAddingSubtaskToTask(null)
+}
+async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean) {
+  // Verificar se tem subtarefas
+  if (hasSubtasks) {
+    const confirmMsg = `A tarefa "${taskName}" possui subtarefas. Deseja excluir a tarefa e todas as suas subtarefas?`
+    if (!confirm(confirmMsg)) return
+  } else {
+    if (!confirm(`Tem certeza que deseja excluir a tarefa "${taskName}"?`)) return
+>>>>>>> 5199bc6aab472bbed79021a2a1ad524ab1316416
   }
 
   async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean) {
@@ -431,6 +528,7 @@ export default function TableViewTab({
       if (!confirm(`Tem certeza que deseja excluir a tarefa "${taskName}"?`)) return
     }
 
+<<<<<<< HEAD
     try {
       const { error } = await supabase
         .from('tasks')
@@ -444,6 +542,13 @@ export default function TableViewTab({
       console.error('Erro ao excluir tarefa:', error)
       alert('Erro ao excluir tarefa')
     }
+=======
+    if (error) throw error
+
+    onRefresh()
+  } catch (error) {
+    alert('Erro ao excluir tarefa')
+>>>>>>> 5199bc6aab472bbed79021a2a1ad524ab1316416
   }
 
   async function deleteSubtask(subtaskId: string, subtaskName: string) {
@@ -455,6 +560,7 @@ export default function TableViewTab({
         .delete()
         .eq('id', subtaskId)
 
+<<<<<<< HEAD
       if (error) throw error
       
       onRefresh()
@@ -462,6 +568,13 @@ export default function TableViewTab({
       console.error('Erro ao excluir subtarefa:', error)
       alert('Erro ao excluir subtarefa')
     }
+=======
+    if (error) throw error
+
+    onRefresh()
+  } catch (error) {
+    alert('Erro ao excluir subtarefa')
+>>>>>>> 5199bc6aab472bbed79021a2a1ad524ab1316416
   }
 
   // Create task names map for modal
