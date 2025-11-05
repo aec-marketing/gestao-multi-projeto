@@ -78,6 +78,7 @@ export default function ResourceManager({ onClose }: ResourceManagerProps) {
       setTasks(tasksData || [])
       setAllocations(allocationsData || [])
     } catch (error) {
+      console.error('Erro ao carregar dados:', error)
     } finally {
       setIsLoading(false)
     }
@@ -109,6 +110,7 @@ export default function ResourceManager({ onClose }: ResourceManagerProps) {
       
       loadData()
     } catch (error) {
+      console.error('Erro ao remover alocação:', error)
     }
   }
 

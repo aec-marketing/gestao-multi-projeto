@@ -36,6 +36,7 @@ export default function RecalculateModal({
           update.end_date
         )
 
+        console.log(`📊 Recalculando tarefa: start=${update.start_date}, end=${update.end_date}, duration=${calculatedDuration}`)
 
         const { error } = await supabase
           .from('tasks')
@@ -51,6 +52,7 @@ export default function RecalculateModal({
 
       onApply()
     } catch (error) {
+      console.error('Erro ao aplicar recalculações:', error)
       alert('Erro ao aplicar recalculações: ' + (error as Error).message)
     }
   }

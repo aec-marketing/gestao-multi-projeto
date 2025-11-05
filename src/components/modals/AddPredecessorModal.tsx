@@ -150,6 +150,7 @@ const [editingPredecessor, setEditingPredecessor] = useState<any>(null)
 
       if (insertError) throw insertError
 
+      console.log('🆕 Novo predecessor adicionado, recalculando tarefas dependentes...')
 
       // Criar o novo predecessor para cálculo
       const newPredecessor = {
@@ -188,6 +189,7 @@ const [editingPredecessor, setEditingPredecessor] = useState<any>(null)
         onClose()
       }
     } catch (err) {
+      console.error('Erro ao adicionar predecessor:', err)
       setError('Erro ao salvar. Tente novamente.')
     } finally {
       setLoading(false)

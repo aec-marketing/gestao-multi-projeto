@@ -39,6 +39,7 @@ export default function Dashboard() {
       setProjects(projectsData || [])
       setResources(resourcesData || [])
     } catch (error) {
+      console.error('Erro ao carregar dados:', error)
     } finally {
       setIsLoading(false)
     }

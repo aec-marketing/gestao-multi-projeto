@@ -41,6 +41,10 @@ export function calculateTaskDateFromPredecessor(
   const lagDays = predecessorRelation.lag_time || 0
   const taskDuration = task.duration || 1
 
+  console.log('📅 Calculando data:')
+  console.log('   Predecessor termina:', predEnd.toISOString().split('T')[0])
+  console.log('   Lag days:', lagDays)
+
   let newStartDate: Date
 
   switch (predecessorRelation.type) {
@@ -48,6 +52,7 @@ export function calculateTaskDateFromPredecessor(
       // Tarefa começa após predecessor terminar
       newStartDate = new Date(predEnd)
       newStartDate.setDate(newStartDate.getDate() + 1 + lagDays)
+      console.log('   Nova data início (FS):', newStartDate.toISOString().split('T')[0])
       break
 
     case 'inicio_inicio':
@@ -92,6 +97,15 @@ export function recalculateTasksInCascade(
   allPredecessors: Predecessor[]
 ): TaskUpdate[] {
 
+  console.log('🔗 Iniciando recalculação em cascata para tarefa:', changedTaskId)
+  console.log('📋 Total de tarefas:', allTasks.length)
+  console.log('🔗 Total de predecessores:', allPredecessors.length)
+  console.log('🔗 Predecessores no sistema:', allPredecessors.map(p => ({
+    task: allTasks.find(t => t.id === p.task_id)?.name,
+    predecessor: allTasks.find(t => t.id === p.predecessor_id)?.name,
+    type: p.type
+  })))
+
   const updates: TaskUpdate[] = []
   const processed = new Set<string>()
   const queue: string[] = [changedTaskId]
@@ -107,13 +121,20 @@ export function recalculateTasksInCascade(
       p => p.predecessor_id === currentTaskId
     )
 
+    console.log(`🔍 Tarefa ${currentTaskId} tem ${dependentPreds.length} dependente(s)`)
+
     for (const pred of dependentPreds) {
       const dependentTask = allTasks.find(t => t.id === pred.task_id)
       const predecessorTask = allTasks.find(t => t.id === pred.predecessor_id)
 
       if (!dependentTask || !predecessorTask) {
+        console.log('⚠️ Tarefa dependente ou predecessor não encontrado')
         continue
       }
+
+      console.log(`📊 Calculando novas datas para "${dependentTask.name}"`)
+      console.log(`   Predecessor: "${predecessorTask.name}"`)
+      console.log(`   Tipo: ${pred.type}, Lag: ${pred.lag_time || 0}`)
 
       // Calcula novas datas
       const newDates = calculateTaskDateFromPredecessor(
@@ -128,10 +149,22 @@ export function recalculateTasksInCascade(
       const oldStart = hasOldDate ? new Date(dependentTask.start_date!).getTime() : 0
       const newStart = newDates.start_date.getTime()
 
+      console.log(`   Data antiga: ${hasOldDate ? dependentTask.start_date : 'sem data'}`)
+      console.log(`   Data nova: ${newDates.start_date.toISOString().split('T')[0]}`)
+
       const dateChanged = oldStart !== newStart
 
       // ✅ SEMPRE adicionar update quando predecessor muda, mesmo que a data calculada seja a mesma
       // Isso garante que quando o predecessor move para trás, o dependente também acompanha
+      if (!hasOldDate) {
+        console.log(`🆕 Tarefa "${dependentTask.name}" não tem data - criando baseado em predecessor`)
+      } else if (dateChanged) {
+        console.log(`📅 Data mudou para "${dependentTask.name}"`)
+      } else {
+        console.log(`🔄 Data não mudou, mas recalculando para garantir consistência`)
+      }
+
+      console.log(`✅ Adicionando update para "${dependentTask.name}"`)
 
       updates.push({
         id: dependentTask.id,
@@ -151,6 +184,7 @@ export function recalculateTasksInCascade(
     }
   }
 
+  console.log(`🎯 Total de updates gerados: ${updates.length}`)
   return updates
 }
 
@@ -272,6 +306,10 @@ export function auditPredecessorConflicts(
   allTasks: Task[],
   allPredecessors: Predecessor[]
 ): TaskUpdate[] {
+  console.log('🔍 Iniciando auditoria de conflitos de predecessores...')
+  console.log(`📋 Total de tarefas: ${allTasks.length}`)
+  console.log(`🔗 Total de predecessores: ${allPredecessors.length}`)
+
   const conflicts: TaskUpdate[] = []
 
   // Para cada tarefa que tem predecessor
@@ -281,17 +319,26 @@ export function auditPredecessorConflicts(
     if (taskPredecessors.length === 0) continue
     if (!task.start_date) continue // Tarefa sem data será tratada por calculateInitialDates
 
+    console.log(`\n🔍 Verificando tarefa: "${task.name}"`)
+    console.log(`   Data atual: ${task.start_date}`)
+    console.log(`   Predecessores: ${taskPredecessors.length}`)
+
     // Para cada predecessor, calcular a data esperada
     for (const pred of taskPredecessors) {
       const predecessorTask = allTasks.find(t => t.id === pred.predecessor_id)
 
       if (!predecessorTask) {
+        console.log(`   ⚠️ Predecessor não encontrado: ${pred.predecessor_id}`)
         continue
       }
 
       if (!predecessorTask.start_date || !predecessorTask.end_date) {
+        console.log(`   ⚠️ Predecessor "${predecessorTask.name}" não tem datas`)
         continue
       }
+
+      console.log(`   📊 Analisando predecessor: "${predecessorTask.name}"`)
+      console.log(`      Tipo: ${pred.type}, Lag: ${pred.lag_time || 0}`)
 
       try {
         const calculatedDates = calculateTaskDateFromPredecessor(
@@ -316,9 +363,14 @@ export function auditPredecessorConflicts(
         const currentStartTime = currentStartDate.getTime()
         const calculatedStartTime = calculatedStartDate.getTime()
 
+        console.log(`      Data atual: ${task.start_date} (timestamp: ${currentStartTime})`)
+        console.log(`      Data calculada: ${calculatedDates.start_date.toISOString().split('T')[0]} (timestamp: ${calculatedStartTime})`)
+
         // Se a data atual é anterior à data calculada, há conflito
         if (currentStartTime < calculatedStartTime) {
           const daysDiff = Math.ceil((calculatedStartTime - currentStartTime) / MS_PER_DAY)
+
+          console.log(`   ❌ CONFLITO! Tarefa começa ${daysDiff} dia(s) antes do permitido`)
 
           // Verificar se já adicionamos um update para esta tarefa
           const existingUpdate = conflicts.find(c => c.id === task.id)
@@ -339,12 +391,15 @@ export function auditPredecessorConflicts(
               reason: `Conflito com predecessor "${predecessorTask.name}" (deve começar ${daysDiff} dia(s) mais tarde)`
             })
           }
+        } else {
+          console.log(`   ✅ OK - Data está correta`)
         }
       } catch (error) {
-        // Erro ao calcular data - ignorar este predecessor
+        console.error(`   ❌ Erro ao calcular data: ${error}`)
       }
     }
   }
 
+  console.log(`\n🎯 Total de conflitos encontrados: ${conflicts.length}`)
   return conflicts
 }

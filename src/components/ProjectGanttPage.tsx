@@ -67,7 +67,7 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
       setResources(resourcesData || [])
       setAllocations(allocationsData || [])
     } catch (error) {
-      // Erro ao carregar dados
+      console.error('Erro ao carregar dados:', error)
     } finally {
       setLoading(false)
     }

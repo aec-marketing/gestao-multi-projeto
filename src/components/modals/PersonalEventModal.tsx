@@ -142,6 +142,7 @@ export default function PersonalEventModal({
       onClose()
       resetForm()
     } catch (err) {
+      console.error('Erro ao salvar evento:', err)
       setError('Erro ao salvar evento. Tente novamente.')
     } finally {
       setIsSubmitting(false)
@@ -181,6 +182,7 @@ export default function PersonalEventModal({
       resetForm()
       setShowDeleteConfirm(false)
     } catch (err) {
+      console.error('Erro ao deletar evento:', err)
       setError('Erro ao deletar evento. Tente novamente.')
     } finally {
       setIsSubmitting(false)
