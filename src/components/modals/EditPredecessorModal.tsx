@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Task } from '@/types/database.types'
 import { recalculateTasksInCascade } from '@/utils/predecessorCalculations'
+import { wouldCreateCycle } from '@/lib/msproject/validation'
 
 interface EditPredecessorModalProps {
   isOpen: boolean
