@@ -18,6 +18,7 @@ interface PredecessorLinesProps {
   dayWidth: number
   rowHeight: number
   expandedTasks: Set<string>
+  onExpandTasks?: (taskIds: string[]) => void // ← NOVO: Callback para expandir tarefas
 }
 
 export default function PredecessorLines({
@@ -26,9 +27,11 @@ export default function PredecessorLines({
   dateRange,
   dayWidth,
   rowHeight,
-  expandedTasks
+  expandedTasks,
+  onExpandTasks
 }: PredecessorLinesProps) {
   const [hoveredLine, setHoveredLine] = React.useState<string | null>(null)
+  const [hoveredBadge, setHoveredBadge] = React.useState<string | null>(null)
 
   // Converte tipo do banco para display
   const typeDisplay: Record<string, string> = {
@@ -141,6 +144,120 @@ export default function PredecessorLines({
   }
   // ========== FIM MAPEAMENTO ==========
 
+  // ========== NOVO: LÓGICA DE REPRESENTAÇÃO POR PAIS ==========
+
+  /**
+   * Encontra o representante visual de uma tarefa
+   * Se a tarefa está visível, retorna ela mesma
+   * Se está colapsada (dentro de um pai não expandido), retorna o pai
+   */
+  function getVisualRepresentative(taskId: string): string {
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return taskId
+
+    // Se a tarefa está no mapa de posições, ela está visível
+    if (taskPositionMap.has(taskId)) {
+      return taskId
+    }
+
+    // Se não está visível, procurar o pai que está visível
+    let currentTask = task
+    while (currentTask.parent_id) {
+      const parent = tasks.find(t => t.id === currentTask.parent_id)
+      if (!parent) break
+
+      // Se o pai está visível, ele é o representante
+      if (taskPositionMap.has(parent.id)) {
+        return parent.id
+      }
+
+      currentTask = parent
+    }
+
+    // Fallback: retornar a própria tarefa
+    return taskId
+  }
+
+  /**
+   * Verifica se uma tarefa está representando predecessores de subtarefas
+   * Retorna um mapa: taskId -> array de predecessor relations que está representando
+   */
+  const representationMap = new Map<string, Array<{
+    pred: Predecessor
+    fromTaskId: string
+    toTaskId: string
+  }>>()
+
+  // Processar todos os predecessors para identificar quais pais estão representando
+  predecessors.forEach(pred => {
+    const fromTask = tasks.find(t => t.id === pred.predecessor_id)
+    const toTask = tasks.find(t => t.id === pred.task_id)
+
+    if (!fromTask || !toTask) return
+
+    // Encontrar representantes visuais
+    const fromRep = getVisualRepresentative(pred.predecessor_id)
+    const toRep = getVisualRepresentative(pred.task_id)
+
+    // Se o representante FROM é diferente da tarefa original (está representando)
+    if (fromRep !== pred.predecessor_id) {
+      if (!representationMap.has(fromRep)) {
+        representationMap.set(fromRep, [])
+      }
+      representationMap.get(fromRep)!.push({
+        pred,
+        fromTaskId: pred.predecessor_id,
+        toTaskId: pred.task_id
+      })
+    }
+
+    // Se o representante TO é diferente da tarefa original (está representando)
+    if (toRep !== pred.task_id) {
+      if (!representationMap.has(toRep)) {
+        representationMap.set(toRep, [])
+      }
+      representationMap.get(toRep)!.push({
+        pred,
+        fromTaskId: pred.predecessor_id,
+        toTaskId: pred.task_id
+      })
+    }
+  })
+
+  /**
+   * Expande todos os envolvidos em uma representação
+   */
+  function expandRepresentation(representativeTaskId: string) {
+    const representations = representationMap.get(representativeTaskId)
+    if (!representations || !onExpandTasks) return
+
+    const tasksToExpand = new Set<string>()
+
+    // Adicionar o próprio representante
+    tasksToExpand.add(representativeTaskId)
+
+    // Para cada predecessor que está sendo representado
+    representations.forEach(({ fromTaskId, toTaskId }) => {
+      // Expandir todos os pais do fromTask
+      let currentTask = tasks.find(t => t.id === fromTaskId)
+      while (currentTask?.parent_id) {
+        tasksToExpand.add(currentTask.parent_id)
+        currentTask = tasks.find(t => t.id === currentTask!.parent_id)
+      }
+
+      // Expandir todos os pais do toTask
+      currentTask = tasks.find(t => t.id === toTaskId)
+      while (currentTask?.parent_id) {
+        tasksToExpand.add(currentTask.parent_id)
+        currentTask = tasks.find(t => t.id === currentTask!.parent_id)
+      }
+    })
+
+    onExpandTasks(Array.from(tasksToExpand))
+  }
+
+  // ========== FIM NOVO ==========
+
   // Calcula a duração visual de uma tarefa (em dias)
   function getTaskDuration(task: Task): number {
     if (!task.start_date || !task.end_date) return task.duration || 1
@@ -162,54 +279,64 @@ export default function PredecessorLines({
       return null
     }
 
-    // ========== NOVO: Verificar se ambas as tarefas estão visíveis ==========
-    // Se qualquer uma das tarefas não estiver no mapa de posições (está colapsada),
-    // não desenhar a linha para evitar linhas apontando para lugares incorretos
-    const fromTaskVisible = taskPositionMap.has(pred.predecessor_id)
-    const toTaskVisible = taskPositionMap.has(pred.task_id)
+    // ========== MODIFICADO: Usar representantes visuais ==========
+    // Encontrar quem vai representar visualmente cada tarefa
+    const fromRepId = getVisualRepresentative(pred.predecessor_id)
+    const toRepId = getVisualRepresentative(pred.task_id)
 
-    if (!fromTaskVisible || !toTaskVisible) {
-      // Uma ou ambas as tarefas estão ocultas (dentro de grupo colapsado)
+    // Se algum representante não está visível, não desenhar
+    if (!taskPositionMap.has(fromRepId) || !taskPositionMap.has(toRepId)) {
       return null
     }
-    // ========== FIM NOVO ==========
+
+    // Buscar as tarefas representantes
+    const fromRepTask = tasks.find(t => t.id === fromRepId)
+    const toRepTask = tasks.find(t => t.id === toRepId)
+
+    if (!fromRepTask || !toRepTask || !fromRepTask.start_date || !toRepTask.start_date) {
+      return null
+    }
+    // ========== FIM MODIFICADO ==========
 
     const type = pred.type
     const isHovered = hoveredLine === pred.id
     const conflicted = isConflicted(pred)
     const color = conflicted ? '#EF4444' : getPredecessorColor(type, isHovered)
 
+    // ========== MODIFICADO: Usar tarefas representantes para posição ==========
     // Pontos de conexão baseados no tipo
     let x1: number, x2: number
 
     if (type === 'fim_inicio') {
-      const fromStart = getDateX(fromTask.start_date)
-      const fromDuration = getTaskDuration(fromTask)
+      const fromStart = getDateX(fromRepTask.start_date)
+      const fromDuration = getTaskDuration(fromRepTask)
       x1 = fromStart + (fromDuration * dayWidth)
-      x2 = getDateX(toTask.start_date)
+      x2 = getDateX(toRepTask.start_date)
 
     } else if (type === 'inicio_inicio') {
-      x1 = getDateX(fromTask.start_date)
-      x2 = getDateX(toTask.start_date)
+      x1 = getDateX(fromRepTask.start_date)
+      x2 = getDateX(toRepTask.start_date)
 
     } else if (type === 'fim_fim') {
-      const fromStart = getDateX(fromTask.start_date)
-      const fromDuration = getTaskDuration(fromTask)
+      const fromStart = getDateX(fromRepTask.start_date)
+      const fromDuration = getTaskDuration(fromRepTask)
       x1 = fromStart + (fromDuration * dayWidth)
 
-      const toStart = getDateX(toTask.start_date)
-      const toDuration = getTaskDuration(toTask)
+      const toStart = getDateX(toRepTask.start_date)
+      const toDuration = getTaskDuration(toRepTask)
       x2 = toStart + (toDuration * dayWidth)
 
     } else { // inicio_fim
-      x1 = getDateX(fromTask.start_date)
-      const toStart = getDateX(toTask.start_date)
-      const toDuration = getTaskDuration(toTask)
+      x1 = getDateX(fromRepTask.start_date)
+      const toStart = getDateX(toRepTask.start_date)
+      const toDuration = getTaskDuration(toRepTask)
       x2 = toStart + (toDuration * dayWidth)
     }
 
-    const y1 = getTaskY(pred.predecessor_id)
-    const y2 = getTaskY(pred.task_id)
+    // Usar posições Y dos representantes
+    const y1 = getTaskY(fromRepId)
+    const y2 = getTaskY(toRepId)
+    // ========== FIM MODIFICADO ==========
 
     const midX = (x1 + x2) / 2
     const midY = (y1 + y2) / 2
@@ -282,7 +409,7 @@ export default function PredecessorLines({
             x={midX - 100}
             y={midY - 40}
             width="200"
-            height="60"
+            height="80"
             style={{ pointerEvents: 'none' }}
           >
             <div
@@ -298,6 +425,11 @@ export default function PredecessorLines({
               <div className="text-gray-300">
                 Tipo: {typeDisplay[type]} | Lag: {pred.lag_time || 0} dias
               </div>
+              {(fromRepId !== pred.predecessor_id || toRepId !== pred.task_id) && (
+                <div className="text-yellow-400 mt-1 text-[10px]">
+                  📊 Representado por pais
+                </div>
+              )}
               {conflicted && (
                 <div className="text-red-400 mt-1">
                   ⚠️ Conflito detectado!
@@ -320,6 +452,97 @@ export default function PredecessorLines({
 
   const totalHeight = currentRow * rowHeight
 
+  // ========== NOVO: Renderizar badges de representação ==========
+  function renderRepresentationBadges() {
+    const badges: JSX.Element[] = []
+
+    representationMap.forEach((representations, taskId) => {
+      if (representations.length === 0) return
+      if (!taskPositionMap.has(taskId)) return // Tarefa não visível
+
+      const task = tasks.find(t => t.id === taskId)
+      if (!task || !task.start_date) return
+
+      const yPosition = getTaskY(taskId)
+      const xPosition = getDateX(task.start_date)
+
+      // Posicionar badge no canto superior direito da barra
+      const badgeX = xPosition + 10
+      const badgeY = yPosition - 20
+
+      const count = representations.length
+      const isHovered = hoveredBadge === taskId
+
+      badges.push(
+        <g key={`badge-${taskId}`}>
+          {/* Círculo da badge */}
+          <circle
+            cx={badgeX}
+            cy={badgeY}
+            r={isHovered ? 14 : 12}
+            fill={isHovered ? '#2563EB' : '#3B82F6'}
+            stroke="white"
+            strokeWidth="2"
+            className="cursor-pointer transition-all"
+            style={{ pointerEvents: 'all' }}
+            onClick={() => expandRepresentation(taskId)}
+            onMouseEnter={() => setHoveredBadge(taskId)}
+            onMouseLeave={() => setHoveredBadge(null)}
+          />
+
+          {/* Número de predecessores representados */}
+          <text
+            x={badgeX}
+            y={badgeY + 1}
+            fontSize={isHovered ? '11' : '10'}
+            fill="white"
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontWeight="bold"
+            className="cursor-pointer transition-all"
+            style={{ pointerEvents: 'none' }}
+          >
+            {count}
+          </text>
+
+          {/* Tooltip da badge */}
+          {isHovered && (
+            <foreignObject
+              x={badgeX - 100}
+              y={badgeY - 60}
+              width="200"
+              height="50"
+              style={{ pointerEvents: 'none' }}
+            >
+              <div
+                className="bg-blue-900 text-white text-xs px-3 py-2 rounded-lg shadow-lg border border-blue-700"
+                style={{
+                  fontFamily: 'system-ui, -apple-system, sans-serif',
+                  lineHeight: '1.4'
+                }}
+              >
+                <div className="font-semibold mb-1">
+                  📊 {count} dependência{count > 1 ? 's' : ''} representada{count > 1 ? 's' : ''}
+                </div>
+                <div className="text-blue-200 text-[10px]">
+                  Clique para expandir todos
+                </div>
+              </div>
+            </foreignObject>
+          )}
+
+          {/* Título nativo para fallback */}
+          <title>
+            {count} dependência{count > 1 ? 's' : ''} representada{count > 1 ? 's' : ''}. Clique para expandir.
+          </title>
+        </g>
+      )
+    })
+
+    return badges
+  }
+  // ========== FIM NOVO ==========
+
   return (
     <svg
       className="absolute top-0 left-0 pointer-events-none z-10"
@@ -330,7 +553,11 @@ export default function PredecessorLines({
         top: 0
       }}
     >
+      {/* Linhas de predecessores */}
       {predecessors.map(pred => drawLine(pred))}
+
+      {/* Badges de representação */}
+      {renderRepresentationBadges()}
     </svg>
   )
 }

@@ -493,6 +493,16 @@ const [predecessors, setPredecessors] = useState<any[]>([])
     })
   }
 
+  // ========== NOVO: Callback para expandir múltiplas tarefas de uma vez ==========
+  const handleExpandMultipleTasks = (taskIds: string[]) => {
+    setExpandedTasks(prev => {
+      const newSet = new Set(prev)
+      taskIds.forEach(id => newSet.add(id))
+      return newSet
+    })
+  }
+  // ========== FIM NOVO ==========
+
   async function deleteSubtask(subtaskId: string) {
     if (!confirm('Tem certeza que deseja excluir esta subtarefa?')) return
 
@@ -1490,6 +1500,7 @@ useEffect(() => {
                 dayWidth={getColumnWidth()}
                 rowHeight={80}
                 expandedTasks={expandedTasks}
+                onExpandTasks={handleExpandMultipleTasks}
               />
             </div>
             {/* ========== FIM NOVO ========== */}
