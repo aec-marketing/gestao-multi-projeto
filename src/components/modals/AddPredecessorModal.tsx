@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { Task } from '@/types/database.types'
 import EditPredecessorModal from '@/components/modals/EditPredecessorModal'
 import { recalculateTasksInCascade } from '@/utils/predecessorCalculations'
+import { wouldCreateCycle } from '@/lib/msproject/validation'
 
 // ============ HELPER FUNCTIONS ============
 
@@ -90,31 +91,7 @@ const [editingPredecessor, setEditingPredecessor] = useState<any>(null)
     return null
   }
 
-  function detectCycle(fromTaskId: string, toTaskId: string, allPreds: Array<{ task_id: string; predecessor_id: string }>): boolean {
-    // BFS para detectar ciclo
-    const visited = new Set<string>()
-    const queue: string[] = [toTaskId]
-
-    while (queue.length > 0) {
-      const current = queue.shift()!
-
-      if (current === fromTaskId) {
-        return true // Encontrou ciclo
-      }
-
-      if (visited.has(current)) continue
-      visited.add(current)
-
-      // Encontrar predecessores do current
-      const preds = allPreds
-        .filter(p => p.task_id === current)
-        .map(p => p.predecessor_id)
-
-      queue.push(...preds)
-    }
-
-    return false
-  }
+  // Removida função detectCycle antiga - agora usando wouldCreateCycle da biblioteca de validação
 
   // ============ SUBMIT ============
 
@@ -130,9 +107,9 @@ const [editingPredecessor, setEditingPredecessor] = useState<any>(null)
       return
     }
 
-    // Validar ciclo
-    if (detectCycle(task.id, selectedPredecessor, existingPredecessors)) {
-      setError('Isso criaria um ciclo de dependências (A→B→C→A)')
+    // Validar ciclo usando biblioteca de validação
+    if (wouldCreateCycle(task.id, selectedPredecessor, existingPredecessors, allTasks)) {
+      setError('⚠️ Este predecessor criaria uma dependência circular! A tarefa não pode depender direta ou indiretamente de si mesma.')
       return
     }
 

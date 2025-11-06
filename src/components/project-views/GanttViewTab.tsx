@@ -10,6 +10,8 @@ import SubtaskManager from '@/components/SubtaskManager'
 import PredecessorLines from '@/components/gantt/PredecessorLines'
 import { recalculateTasksInCascade, validateTaskStartDate, auditPredecessorConflicts } from '@/utils/predecessorCalculations'
 import RecalculateModal from '@/components/modals/RecalculateModal'
+import CycleAuditModal from '@/components/modals/CycleAuditModal'
+import { detectCycles } from '@/lib/msproject/validation'
 
 
 interface GanttViewTabProps {
@@ -137,6 +139,14 @@ const [predecessors, setPredecessors] = useState<any[]>([])
   // ========== NOVO: Estados para Recalculação em Cascata ==========
   const [showRecalculateModal, setShowRecalculateModal] = useState(false)
   const [pendingUpdates, setPendingUpdates] = useState<any[]>([])
+  // ========== FIM NOVO ==========
+
+  // ========== NOVO: Estado para Modal de Auditoria de Ciclos ==========
+  const [showCycleAudit, setShowCycleAudit] = useState(false)
+  // ========== FIM NOVO ==========
+
+  // ========== NOVO: Estado para Highlight de Ciclos ==========
+  const [tasksInCycle, setTasksInCycle] = useState<Set<string>>(new Set())
   // ========== FIM NOVO ==========
 
   function calculateTaskDates(): TaskWithDates[] {
@@ -460,7 +470,11 @@ const [predecessors, setPredecessors] = useState<any[]>([])
   }
 
   // Cores das tarefas
-  const getTaskColor = (type: string, isSubtask: boolean, isDelayed: boolean = false) => {
+  const getTaskColor = (type: string, isSubtask: boolean, isDelayed: boolean = false, taskId?: string) => {
+    // ========== NOVO: Tarefas em ciclo ficam vermelhas com borda ==========
+    if (taskId && tasksInCycle.has(taskId)) return 'bg-red-600 border-2 border-red-900'
+    // ========== FIM NOVO ==========
+
     // Subtarefas atrasadas ficam vermelhas
     if (isSubtask && isDelayed) return 'bg-red-600'
 
@@ -747,6 +761,21 @@ function handleResizeStart(taskId: string, edge: 'start' | 'end', e: React.Mouse
 useEffect(() => {
   loadPredecessors()
 }, [project.id])
+
+// ========== NOVO: useEffect para detectar ciclos ==========
+useEffect(() => {
+  if (tasks.length > 0 && predecessors.length > 0) {
+    const cycleDetection = detectCycles(tasks, predecessors)
+    if (cycleDetection.hasCycle) {
+      setTasksInCycle(new Set(cycleDetection.cycleNodes))
+    } else {
+      setTasksInCycle(new Set())
+    }
+  } else {
+    setTasksInCycle(new Set())
+  }
+}, [tasks, predecessors])
+// ========== FIM NOVO ==========
 
 async function loadPredecessors() {
   const { data, error } = await supabase
@@ -1195,7 +1224,7 @@ useEffect(() => {
 
           {/* Barra da tarefa */}
           <div
-            className={`absolute top-1/2 transform -translate-y-1/2 h-8 rounded shadow-sm ${getTaskColor(task.type, isSubtask, isDelayed)} ${
+            className={`absolute top-1/2 transform -translate-y-1/2 h-8 rounded shadow-sm ${getTaskColor(task.type, isSubtask, isDelayed, task.id)} ${
               isSubtask ? 'opacity-70' : 'opacity-90'
             } ${selectedTask === task.id ? 'ring-2 ring-blue-500' : ''} ${
               isDelayed ? 'ring-2 ring-red-600' : ''
@@ -1231,6 +1260,13 @@ useEffect(() => {
                   ATRASO
                 </span>
               )}
+              {/* ========== NOVO: Badge de Ciclo ========== */}
+              {tasksInCycle.has(task.id) && (
+                <span className="text-white text-[10px] font-bold bg-red-900 px-1 rounded animate-pulse">
+                  CICLO
+                </span>
+              )}
+              {/* ========== FIM NOVO ========== */}
             </div>
 
             {/* Indicador de resize em tempo real */}
@@ -1302,13 +1338,22 @@ useEffect(() => {
                 {tasksWithDates.length} tarefas • {dateGrid.length} dias
               </p>
             </div>
-            <button
-              onClick={handleAuditConflicts}
-              className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-              title="Verificar e corrigir conflitos de predecessores"
-            >
-              🔄 Verificar Conflitos
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleAuditConflicts}
+                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                title="Verificar e corrigir conflitos de predecessores"
+              >
+                🔄 Verificar Conflitos
+              </button>
+              <button
+                onClick={() => setShowCycleAudit(true)}
+                className="px-3 py-1 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600 flex items-center gap-2"
+                title="Verificar ciclos em predecessores"
+              >
+                🔄 Auditar Ciclos
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1751,6 +1796,18 @@ useEffect(() => {
           onRefresh() // Recarrega após aplicar
         }}
       />
+      {/* ========== FIM NOVO ========== */}
+
+      {/* ========== NOVO: Modal de Auditoria de Ciclos ========== */}
+      {showCycleAudit && (
+        <CycleAuditModal
+          projectId={project.id}
+          tasks={tasks}
+          isOpen={showCycleAudit}
+          onClose={() => setShowCycleAudit(false)}
+          onRefresh={onRefresh}
+        />
+      )}
       {/* ========== FIM NOVO ========== */}
     </>
   )
