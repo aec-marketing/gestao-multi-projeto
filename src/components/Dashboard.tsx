@@ -92,14 +92,24 @@ export default function Dashboard() {
               Visão geral dos projetos e recursos
             </p>
           </div>
-          <div className="flex space-x-3">
-            <button 
+          <div className="flex flex-wrap gap-3">
+            <button
               onClick={() => setShowNewProjectForm(true)}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
             >
               <span>➕</span>
               <span>Novo Projeto</span>
             </button>
+            <Link
+              href="/import"
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center space-x-2 relative"
+            >
+              <span>📂</span>
+              <span>Importar MS Project</span>
+              <span className="absolute -top-1 -right-1 bg-yellow-400 text-purple-900 text-xs px-1.5 py-0.5 rounded-full font-bold">
+                NOVO
+              </span>
+            </Link>
             <button
               onClick={() => setShowResourceManager(true)}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
@@ -109,7 +119,7 @@ export default function Dashboard() {
             </button>
             <Link
               href="/calendario"
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center space-x-2"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2"
             >
               <span>📅</span>
               <span>Calendário</span>
@@ -153,6 +163,67 @@ export default function Dashboard() {
           />
         </div>
 
+        {/* Card Destaque: Importar MS Project */}
+        <div className="mb-8">
+          <div className="relative overflow-hidden bg-gradient-to-br from-purple-600 via-purple-500 to-indigo-600 rounded-xl shadow-xl p-6 text-white">
+            {/* Background Pattern */}
+            <div className="absolute inset-0 opacity-10">
+              <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="white" strokeWidth="1"/>
+                  </pattern>
+                </defs>
+                <rect width="100%" height="100%" fill="url(#grid)" />
+              </svg>
+            </div>
+
+            {/* Conteúdo */}
+            <div className="relative z-10">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <div className="inline-block px-3 py-1 bg-white/20 rounded-full text-xs font-semibold mb-2">
+                    NOVO 🎉
+                  </div>
+                  <h3 className="text-2xl font-bold">Importar MS Project</h3>
+                  <p className="text-purple-100 mt-2">
+                    Migre seus projetos do MS Project 2016+ em segundos
+                  </p>
+                </div>
+                <div className="text-5xl opacity-80">📂</div>
+              </div>
+
+              {/* Features */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-green-300">✓</span>
+                  <span>Hierarquia 4+ níveis</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-green-300">✓</span>
+                  <span>Predecessores</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-green-300">✓</span>
+                  <span>Preview completo</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-green-300">✓</span>
+                  <span>Import seguro</span>
+                </div>
+              </div>
+
+              {/* CTA */}
+              <Link
+                href="/import"
+                className="block w-full md:w-auto md:inline-block text-center px-6 py-3 bg-white text-purple-600 rounded-lg font-bold hover:bg-purple-50 transition-all transform hover:scale-105 shadow-lg"
+              >
+                📁 Importar Projeto Agora
+              </Link>
+            </div>
+          </div>
+        </div>
+
         {/* Projects Section */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-6">
@@ -188,12 +259,20 @@ export default function Dashboard() {
         <div className="bg-white rounded-lg border p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Ações Rápidas</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <button className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-center group">
-              <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">📅</div>
-              <div className="text-sm font-medium text-gray-700">Calendário</div>
-              <div className="text-xs text-gray-500 mt-1">Ver recursos</div>
-            </button>
-            <button 
+            {/* Importar MS Project - Destacado */}
+            <Link
+              href="/import"
+              className="p-4 border-2 border-purple-300 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors text-center group relative"
+            >
+              <div className="absolute -top-2 -right-2 bg-purple-600 text-white text-xs px-2 py-1 rounded-full font-semibold shadow-lg">
+                NOVO
+              </div>
+              <div className="text-2xl mb-2 group-hover:scale-110 transition-transform">📂</div>
+              <div className="text-sm font-medium text-purple-700">Importar MS Project</div>
+              <div className="text-xs text-purple-600 mt-1">XML 2016+</div>
+            </Link>
+
+            <button
               onClick={() => setShowResourceManager(true)}
               className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-center group"
             >

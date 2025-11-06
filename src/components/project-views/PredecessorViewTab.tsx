@@ -40,19 +40,47 @@ interface PredecessorViewTabProps {
 function getPredecessorTypeLabel(type: string): string {
   const labels: Record<string, { name: string; icon: string }> = {
     'FS': { name: 'Fim-Início', icon: '→' },
+    'fim_inicio': { name: 'Fim-Início', icon: '→' },
     'SS': { name: 'Início-Início', icon: '⇒' },
-    'FF': { name: 'Fim-Fim', icon: '←' }
+    'inicio_inicio': { name: 'Início-Início', icon: '⇒' },
+    'FF': { name: 'Fim-Fim', icon: '←' },
+    'fim_fim': { name: 'Fim-Fim', icon: '←' },
+    'SF': { name: 'Início-Fim', icon: '↔' },
+    'inicio_fim': { name: 'Início-Fim', icon: '↔' }
   }
   return `${labels[type]?.icon || '?'} ${labels[type]?.name || type}`
 }
 
 function formatLagTime(lag: number): string {
-  if (lag === 0) return 'sem lag'
+  if (lag === 0) return '0 dias'
   if (lag === 0.5) return '+0.5 dia'
   if (lag === 1) return '+1 dia'
   if (lag > 1) return `+${lag} dias`
   if (lag < 0) return `${lag} dias (sobreposição)`
   return `+${lag} dias`
+}
+
+function getTaskTypeColor(type: string): string {
+  const colors: Record<string, string> = {
+    'projeto_mecanico': 'bg-blue-100 text-blue-800',
+    'compras_mecanica': 'bg-purple-100 text-purple-800',
+    'projeto_eletrico': 'bg-yellow-100 text-yellow-800',
+    'compras_eletrica': 'bg-orange-100 text-orange-800',
+    'fabricacao': 'bg-green-100 text-green-800',
+    'tratamento_superficial': 'bg-pink-100 text-pink-800',
+    'montagem_mecanica': 'bg-indigo-100 text-indigo-800',
+    'montagem_eletrica': 'bg-red-100 text-red-800',
+    'coleta': 'bg-teal-100 text-teal-800',
+    'subtarefa': 'bg-gray-100 text-gray-800'
+  }
+  return colors[type] || 'bg-gray-100 text-gray-800'
+}
+
+function formatTaskType(type: string): string {
+  return type
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
 }
 
 // ============ COMPONENT ============
@@ -189,6 +217,233 @@ async function handleDeletePredecessor(predecessorId: string) {
     filteredTasks.sort((a, b) => a.task.name.localeCompare(b.task.name))
   }
 
+  // ========== COMPONENTE RECURSIVO PARA RENDERIZAR TAREFA COM PREDECESSORES ==========
+  interface TaskPredecessorRowProps {
+    task: Task
+    level: number
+    allTasks: Task[]
+    predecessors: Predecessor[]
+    onAddPredecessor: (task: Task) => void
+    onEditPredecessor: (pred: Predecessor) => void
+    onDeletePredecessor: (predId: string) => void
+  }
+
+  const TaskPredecessorRow: React.FC<TaskPredecessorRowProps> = ({
+    task,
+    level,
+    allTasks,
+    predecessors,
+    onAddPredecessor,
+    onEditPredecessor,
+    onDeletePredecessor
+  }) => {
+    // Buscar subtarefas DIRETAS
+    const subtasks = allTasks.filter(t => t.parent_id === task.id)
+    const hasSubtasks = subtasks.length > 0
+
+    // Calcular indentação baseado em outline_level
+    const indentLevel = task.outline_level || level
+    const indent = indentLevel * 30 // 30px por nível
+
+    // Buscar predecessores desta tarefa
+    const taskPredecessors = predecessors
+      .filter(p => p.task_id === task.id)
+      .map(p => {
+        const predTask = allTasks.find(t => t.id === p.predecessor_id)
+        return {
+          predecessor: p,
+          predecessorTask: predTask
+        }
+      })
+      .filter(rel => rel.predecessorTask) // Garantir que encontrou a tarefa
+
+    // Buscar sucessores (tarefas que dependem desta)
+    const taskSuccessors = predecessors
+      .filter(p => p.predecessor_id === task.id)
+      .map(p => {
+        const succTask = allTasks.find(t => t.id === p.task_id)
+        return {
+          successor: p,
+          successorTask: succTask
+        }
+      })
+      .filter(rel => rel.successorTask)
+
+    return (
+      <>
+        {/* Card da Tarefa */}
+        <div className="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-shadow mb-4">
+          {/* Cabeçalho da Tarefa */}
+          <div
+            className="flex items-start justify-between mb-3"
+            style={{ paddingLeft: `${indent}px` }}
+          >
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                {level > 0 && <span className="text-gray-400">└─</span>}
+
+                {/* WBS Code */}
+                {task.wbs_code && (
+                  <span className="text-xs font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                    {task.wbs_code}
+                  </span>
+                )}
+
+                {/* Nome da Tarefa */}
+                <h3 className={`font-semibold ${hasSubtasks ? 'text-lg text-gray-900' : 'text-base text-gray-800'}`}>
+                  {task.name}
+                </h3>
+
+                {/* Badge de Tipo */}
+                <span className={`text-xs px-2 py-0.5 rounded ${getTaskTypeColor(task.type)}`}>
+                  {formatTaskType(task.type)}
+                </span>
+              </div>
+
+              {/* Info Secundária */}
+              <div className="flex items-center gap-4 text-xs text-gray-500">
+                <span>📅 {task.start_date ? new Date(task.start_date).toLocaleDateString('pt-BR') : 'Sem data'}</span>
+                <span>⏱️ {task.duration} {task.duration === 1 ? 'dia' : 'dias'}</span>
+                <span>📊 {task.progress}%</span>
+              </div>
+            </div>
+
+            {/* Botão Adicionar Predecessor */}
+            <button
+              onClick={() => onAddPredecessor(task)}
+              className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            >
+              ➕ Adicionar
+            </button>
+          </div>
+
+          {/* Grid de Predecessores e Sucessores */}
+          <div
+            className="grid grid-cols-1 md:grid-cols-2 gap-4"
+            style={{ paddingLeft: `${indent}px` }}
+          >
+            {/* Predecessores (tarefas das quais esta depende) */}
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                📥 Depende de ({taskPredecessors.length}):
+              </h4>
+
+              {taskPredecessors.length === 0 ? (
+                <p className="text-xs text-gray-400 italic">Nenhuma dependência</p>
+              ) : (
+                <ul className="space-y-2">
+                  {taskPredecessors.map((rel) => (
+                    <li
+                      key={rel.predecessor.id}
+                      className="flex items-center gap-2 text-xs bg-blue-50 border border-blue-200 rounded p-2"
+                    >
+                      {/* WBS do Predecessor */}
+                      <span className="font-mono text-blue-700 font-bold min-w-[60px]">
+                        {rel.predecessorTask!.wbs_code || `#${rel.predecessorTask!.sort_order}`}
+                      </span>
+
+                      {/* Nome */}
+                      <span className="flex-1 text-gray-900 truncate" title={rel.predecessorTask!.name}>
+                        {rel.predecessorTask!.name}
+                      </span>
+
+                      {/* Tipo */}
+                      <span className="text-blue-600 font-medium whitespace-nowrap">
+                        {getPredecessorTypeLabel(rel.predecessor.type)}
+                      </span>
+
+                      {/* Lag */}
+                      <span className="text-gray-600 whitespace-nowrap">
+                        {formatLagTime(rel.predecessor.lag_time)}
+                      </span>
+
+                      {/* Ações */}
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => onEditPredecessor(rel.predecessor)}
+                          className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                          title="Editar predecessor"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => onDeletePredecessor(rel.predecessor.id)}
+                          className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                          title="Remover predecessor"
+                        >
+                          ❌
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* Sucessores (tarefas que dependem desta) */}
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                📤 Depende dela ({taskSuccessors.length}):
+              </h4>
+
+              {taskSuccessors.length === 0 ? (
+                <p className="text-xs text-gray-400 italic">Nenhuma tarefa depende dela</p>
+              ) : (
+                <ul className="space-y-2">
+                  {taskSuccessors.map((rel) => (
+                    <li
+                      key={rel.successor.id}
+                      className="flex items-center gap-2 text-xs bg-green-50 border border-green-200 rounded p-2"
+                    >
+                      {/* WBS do Sucessor */}
+                      <span className="font-mono text-green-700 font-bold min-w-[60px]">
+                        {rel.successorTask!.wbs_code || `#${rel.successorTask!.sort_order}`}
+                      </span>
+
+                      {/* Nome */}
+                      <span className="flex-1 text-gray-900 truncate" title={rel.successorTask!.name}>
+                        {rel.successorTask!.name}
+                      </span>
+
+                      {/* Tipo */}
+                      <span className="text-green-600 font-medium whitespace-nowrap">
+                        {getPredecessorTypeLabel(rel.successor.type)}
+                      </span>
+
+                      {/* Lag */}
+                      <span className="text-gray-600 whitespace-nowrap">
+                        {formatLagTime(rel.successor.lag_time)}
+                      </span>
+
+                      {/* Info: Não permite editar/deletar via sucessor, só via tarefa que depende */}
+                      <span className="text-xs text-gray-400 italic">
+                        (editar na tarefa)
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* RECURSÃO: Renderizar subtarefas */}
+        {subtasks.map(subtask => (
+          <TaskPredecessorRow
+            key={subtask.id}
+            task={subtask}
+            level={level + 1}
+            allTasks={allTasks}
+            predecessors={predecessors}
+            onAddPredecessor={onAddPredecessor}
+            onEditPredecessor={onEditPredecessor}
+            onDeletePredecessor={onDeletePredecessor}
+          />
+        ))}
+      </>
+    )
+  }
+
   // ============ RENDER ============
   return (
     <div className="bg-white rounded-lg border overflow-hidden">
@@ -288,214 +543,93 @@ async function handleDeletePredecessor(predecessorId: string) {
             </div>
           </div>
         ) : (
-          <div className="space-y-6">
-            {filteredTasks.map((item) => (
-              <div
-                key={item.task.id}
-                className="border rounded-lg p-4 bg-white hover:bg-gray-50 transition-colors"
-              >
-                {/* Cabeçalho da Tarefa */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                      <span className="text-blue-600 font-bold">{item.task.sort_order}</span>
-                      {item.task.name}
-                    </h3>
-                    <p className="text-xs text-gray-600 mt-1">
-                      Tipo: <span className="font-medium">{item.task.type}</span>
-                      {' • '}
-                      Duração: <span className="font-medium">{item.task.duration} dias</span>
-                      {' • '}
-                      Progresso: <span className="font-medium">{item.task.progress || 0}%</span>
-                    </p>
-                  </div>
-                  <div className="text-right text-xs text-gray-500">
-                    <div>Predecessores: <span className="font-bold text-gray-900">{item.predecessors.length}</span></div>
-                    <div>Dependentes: <span className="font-bold text-gray-900">{item.successors.length}</span></div>
-                  </div>
-                </div>
-                {/* ========== NOVO: Modal de Adicionar Predecessor ==========*/}
-<AddPredecessorModal
-  isOpen={showAddModal}
-  task={selectedTaskForPredecessor}
-  allTasks={tasks}
-  existingPredecessors={getExistingPredecessorPairs()}
-  allPredecessors={predecessors}
-  onClose={() => {
-    setShowAddModal(false)
-    setSelectedTaskForPredecessor(null)
-  }}
-  onSuccess={() => {
-    loadPredecessors()
-    onRefresh()
-  }}
-  onRecalculate={(updates) => {
-    setPendingUpdates(updates)
-    setShowRecalculateModal(true)
-  }}
-/>
-
-{/* Modal de Editar */}
-<EditPredecessorModal
-  isOpen={showEditModal}
-  predecessor={editingPredecessor}
-  allTasks={tasks}
-  allPredecessors={predecessors}
-  onClose={() => {
-    setShowEditModal(false)
-    setEditingPredecessor(null)
-  }}
-  onSuccess={() => {
-    loadPredecessors()
-    onRefresh()
-  }}
-  onRecalculate={(updates) => {
-    setPendingUpdates(updates)
-    setShowRecalculateModal(true)
-  }}
-/>
-
-{/* Modal de Recalcular */}
-<RecalculateModal
-  isOpen={showRecalculateModal}
-  updates={pendingUpdates}
-  taskNames={new Map(tasks.map(t => [t.id, t.name]))}
-  onClose={() => {
-    setShowRecalculateModal(false)
-    setPendingUpdates([])
-    loadPredecessors()
-    onRefresh()
-  }}
-  onApply={() => {
-    setShowRecalculateModal(false)
-    setPendingUpdates([])
-    loadPredecessors()
-    onRefresh()
-  }}
-/>
-{/* ========== FIM NOVO ==========*/}
-{/* ========== NOVO: Botão Adicionar ==========*/}
-<div className="mb-4">
-  <button
-    onClick={() => {
-      setSelectedTaskForPredecessor(item.task)
-      setShowAddModal(true)
-    }}
-    className="px-3 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors"
-  >
-    + Adicionar Predecessor
-  </button>
-</div>
-{/* ========== FIM NOVO ==========*/}
-                {/* Predecessores (tarefas que esta depende) */}
-                <div className="mb-4">
-                  <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                    📥 Depende de ({item.predecessors.length}):
-                  </h4>
-                  {item.predecessors.length === 0 ? (
-                    <p className="text-xs text-gray-500 italic">Nenhuma dependência</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {item.predecessors.map((rel) => (
-                        <li
-                          key={rel.predecessor.id}
-                          className="flex items-center gap-2 text-xs bg-blue-50 border border-blue-200 rounded p-2"
-                        >
-                          <span className="font-mono text-blue-700 font-bold min-w-[40px]">
-                            {rel.predecessorTask.sort_order}
-                          </span>
-                          <span className="flex-1 text-gray-900">
-                            {rel.predecessorTask.name}
-                          </span>
-                          <span className="text-blue-600 font-medium whitespace-nowrap">
-                            {getPredecessorTypeLabel(rel.predecessor.type)}
-                          </span>
-                          <span className="text-gray-600 whitespace-nowrap">
-                            {formatLagTime(rel.predecessor.lag_time)}
-                          </span>
-
-                          {/* Botões Editar/Deletar */}
-                          <div className="flex gap-1">
-                            <button
-                              onClick={() => {
-                                setEditingPredecessor(rel.predecessor)
-                                setShowEditModal(true)
-                              }}
-                              className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                            >
-                              ✏️ Editar
-                            </button>
-                            <button
-                              onClick={() => handleDeletePredecessor(rel.predecessor.id)}
-                              className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
-                            >
-                              ❌
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                {/* Sucessores (tarefas que dependem desta) */}
-                <div>
-                  <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                    📤 Depende dela ({item.successors.length}):
-                  </h4>
-                  {item.successors.length === 0 ? (
-                    <p className="text-xs text-gray-500 italic">Nenhuma tarefa depende dela</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {item.successors.map((rel) => (
-                        <li
-                          key={rel.successor.id}
-                          className="flex items-center gap-2 text-xs bg-green-50 border border-green-200 rounded p-2"
-                        >
-                          <span className="font-mono text-green-700 font-bold min-w-[40px]">
-                            {rel.successorTask.sort_order}
-                          </span>
-                          <span className="flex-1 text-gray-900">
-                            {rel.successorTask.name}
-                          </span>
-                          <span className="text-green-600 font-medium whitespace-nowrap">
-                            {getPredecessorTypeLabel(rel.successor.type)}
-                          </span>
-                          <span className="text-gray-600 whitespace-nowrap">
-                            {formatLagTime(rel.successor.lag_time)}
-                          </span>
-
-                          {/* Botões Editar/Deletar */}
-                          <div className="flex gap-1">
-                            <button
-                              onClick={() => {
-                                setEditingPredecessor(rel.successor)
-                                setShowEditModal(true)
-                              }}
-                              className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
-                            >
-                              ✏️ Editar
-                            </button>
-                            <button
-                              onClick={() => handleDeletePredecessor(rel.successor.id)}
-                              className="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
-                            >
-                              ❌
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                {/* Divisor */}
-                <div className="mt-4 pt-4 border-t border-gray-200" />
-              </div>
-            ))}
+          <div className="space-y-3">
+            {/* Renderizar tarefas raiz (sem parent_id) usando recursividade */}
+            {filteredTasks
+              .filter(item => !item.task.parent_id)
+              .map((item) => (
+                <TaskPredecessorRow
+                  key={item.task.id}
+                  task={item.task}
+                  level={0}
+                  allTasks={tasks}
+                  predecessors={predecessors}
+                  onAddPredecessor={(task) => {
+                    setSelectedTaskForPredecessor(task)
+                    setShowAddModal(true)
+                  }}
+                  onEditPredecessor={(pred) => {
+                    setEditingPredecessor(pred)
+                    setShowEditModal(true)
+                  }}
+                  onDeletePredecessor={handleDeletePredecessor}
+                />
+              ))}
           </div>
         )}
       </div>
+
+      {/* Modais (fora do loop de renderização) */}
+      {/* ========== Modal de Adicionar Predecessor ========== */}
+      <AddPredecessorModal
+        isOpen={showAddModal}
+        task={selectedTaskForPredecessor}
+        allTasks={tasks}
+        existingPredecessors={getExistingPredecessorPairs()}
+        allPredecessors={predecessors}
+        onClose={() => {
+          setShowAddModal(false)
+          setSelectedTaskForPredecessor(null)
+        }}
+        onSuccess={() => {
+          loadPredecessors()
+          onRefresh()
+        }}
+        onRecalculate={(updates) => {
+          setPendingUpdates(updates)
+          setShowRecalculateModal(true)
+        }}
+      />
+
+      {/* Modal de Editar */}
+      <EditPredecessorModal
+        isOpen={showEditModal}
+        predecessor={editingPredecessor}
+        allTasks={tasks}
+        allPredecessors={predecessors}
+        onClose={() => {
+          setShowEditModal(false)
+          setEditingPredecessor(null)
+        }}
+        onSuccess={() => {
+          loadPredecessors()
+          onRefresh()
+        }}
+        onRecalculate={(updates) => {
+          setPendingUpdates(updates)
+          setShowRecalculateModal(true)
+        }}
+      />
+
+      {/* Modal de Recalcular */}
+      <RecalculateModal
+        isOpen={showRecalculateModal}
+        updates={pendingUpdates}
+        taskNames={new Map(tasks.map(t => [t.id, t.name]))}
+        onClose={() => {
+          setShowRecalculateModal(false)
+          setPendingUpdates([])
+          loadPredecessors()
+          onRefresh()
+        }}
+        onApply={() => {
+          setShowRecalculateModal(false)
+          setPendingUpdates([])
+          loadPredecessors()
+          onRefresh()
+        }}
+      />
+      {/* ========== FIM MODAIS ========== */}
 
       {/* Footer com Info */}
       <div className="px-6 py-4 bg-gray-50 border-t text-xs text-gray-600">
