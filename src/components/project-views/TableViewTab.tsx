@@ -8,55 +8,6 @@ import { supabase } from '@/lib/supabase'
 import { recalculateTasksInCascade, validateTaskStartDate } from '@/utils/predecessorCalculations'
 import RecalculateModal from '@/components/modals/RecalculateModal'
 
-// Função para obter cores das tarefas (igual ao Gantt)
-function getTaskColors(type: string, isSubtask: boolean) {
-  const colors: Record<string, { main: string; pastel: string }> = {
-    'projeto_mecanico': { 
-      main: 'bg-blue-500 text-white', 
-      pastel: 'bg-blue-100 text-blue-800' 
-    },
-    'compras_mecanica': { 
-      main: 'bg-purple-500 text-white', 
-      pastel: 'bg-purple-100 text-purple-800' 
-    },
-    'projeto_eletrico': { 
-      main: 'bg-yellow-500 text-white', 
-      pastel: 'bg-yellow-100 text-yellow-800' 
-    },
-    'compras_eletrica': { 
-      main: 'bg-orange-500 text-white', 
-      pastel: 'bg-orange-100 text-orange-800' 
-    },
-    'fabricacao': { 
-      main: 'bg-green-500 text-white', 
-      pastel: 'bg-green-100 text-green-800' 
-    },
-    'tratamento_superficial': { 
-      main: 'bg-pink-500 text-white', 
-      pastel: 'bg-pink-100 text-pink-800' 
-    },
-    'montagem_mecanica': { 
-      main: 'bg-indigo-500 text-white', 
-      pastel: 'bg-indigo-100 text-indigo-800' 
-    },
-    'montagem_eletrica': { 
-      main: 'bg-red-500 text-white', 
-      pastel: 'bg-red-100 text-red-800' 
-    },
-    'coleta': { 
-      main: 'bg-teal-500 text-white', 
-      pastel: 'bg-teal-100 text-teal-800' 
-    }
-  }
-  
-  const taskColors = colors[type] || { 
-    main: 'bg-gray-500 text-white', 
-    pastel: 'bg-gray-100 text-gray-800' 
-  }
-  
-  return isSubtask ? taskColors.pastel : taskColors.main
-}
-
 interface TableViewTabProps {
   project: Project
   tasks: Task[]
@@ -165,6 +116,32 @@ function filterTasks(tasksToFilter: Task[]) {
 const mainTasks = sortTasks(
   filterTasks(tasks.filter(t => !t.parent_id))
 )
+
+// ========== FUNÇÕES AUXILIARES ==========
+// Formatar tipo de tarefa para exibição
+function formatTaskType(type: string): string {
+  return type
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+// Classe de cor baseada no tipo
+function getTaskColorClass(type: string): string {
+  const colors: Record<string, string> = {
+    'projeto_mecanico': 'bg-blue-100 text-blue-800',
+    'compras_mecanica': 'bg-purple-100 text-purple-800',
+    'projeto_eletrico': 'bg-yellow-100 text-yellow-800',
+    'compras_eletrica': 'bg-orange-100 text-orange-800',
+    'fabricacao': 'bg-green-100 text-green-800',
+    'tratamento_superficial': 'bg-pink-100 text-pink-800',
+    'montagem_mecanica': 'bg-indigo-100 text-indigo-800',
+    'montagem_eletrica': 'bg-red-100 text-red-800',
+    'coleta': 'bg-teal-100 text-teal-800',
+    'subtarefa': 'bg-gray-100 text-gray-800'
+  }
+  return colors[type] || 'bg-gray-100 text-gray-800'
+}
 // ADICIONE ESTA FUNÇÃO:
 async function updateTask(taskId: string, field: string, value: string | number) {
   try {
@@ -426,26 +403,297 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
   }
 }
 
-async function deleteSubtask(subtaskId: string, subtaskName: string) {
-  if (!confirm(`Tem certeza que deseja excluir a subtarefa "${subtaskName}"?`)) return
-
-  try {
-    const { error } = await supabase
-      .from('tasks')
-      .delete()
-      .eq('id', subtaskId)
-
-    if (error) throw error
-    
-    onRefresh()
-  } catch (error) {
-    console.error('Erro ao excluir subtarefa:', error)
-    alert('Erro ao excluir subtarefa')
-  }
-}
-
   // Create task names map for modal
   const taskNamesMap = new Map(tasks.map(t => [t.id, t.name]))
+
+  // ========== COMPONENTE RECURSIVO PARA RENDERIZAR TAREFAS ==========
+  interface TaskRowProps {
+    task: Task
+    level: number
+    allTasks: Task[]
+  }
+
+  const TaskRow: React.FC<TaskRowProps> = ({ task, level, allTasks }) => {
+    // Buscar subtarefas DIRETAS deste task
+    const subtasks = allTasks.filter(t => t.parent_id === task.id)
+    const hasSubtasks = subtasks.length > 0
+
+    // Calcular indentação baseado no outline_level (mais preciso) ou level
+    const indentLevel = task.outline_level || level
+    const indent = indentLevel * 30 // 30px por nível
+
+    // Calcular totais se tiver subtarefas (soma recursiva)
+    const calculateTotalCost = (taskId: string, field: 'estimated_cost' | 'actual_cost'): number => {
+      const directSubtasks = allTasks.filter(t => t.parent_id === taskId)
+      if (directSubtasks.length === 0) return 0
+
+      return directSubtasks.reduce((sum, sub) => {
+        const subCost = sub[field] || 0
+        const recursiveCost = calculateTotalCost(sub.id, field)
+        return sum + subCost + recursiveCost
+      }, 0)
+    }
+
+    const totalEstimatedCost = hasSubtasks ? calculateTotalCost(task.id, 'estimated_cost') : 0
+    const totalActualCost = hasSubtasks ? calculateTotalCost(task.id, 'actual_cost') : 0
+
+    const taskAllocations = allocations.filter(a => a.task_id === task.id)
+
+    return (
+      <>
+        {/* Linha da Tarefa Atual */}
+        <tr className={hasSubtasks ? 'bg-gray-50 font-medium' : 'hover:bg-gray-50'}>
+          {/* WBS Code */}
+          <td className="px-4 py-2 text-xs text-gray-500 font-mono">
+            {task.wbs_code || '-'}
+          </td>
+
+          {/* Nome com Indentação */}
+          <td className="px-4 py-2">
+            <div
+              className="flex items-center gap-2"
+              style={{ paddingLeft: `${indent}px` }}
+            >
+              {level > 0 && <span className="text-gray-400">└─</span>}
+
+              <input
+                type="text"
+                defaultValue={task.name}
+                className="flex-1 border-0 bg-transparent text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 rounded px-2 py-1"
+                onDoubleClick={(e) => e.currentTarget.select()}
+                onBlur={(e) => updateTask(task.id, 'name', e.target.value)}
+              />
+            </div>
+          </td>
+
+          {/* Tipo */}
+          <td className="px-4 py-2">
+            <span className={`px-2 py-1 rounded text-xs ${getTaskColorClass(task.type)}`}>
+              {formatTaskType(task.type)}
+            </span>
+          </td>
+
+          {/* Duração */}
+          <td className="px-4 py-2 text-center">
+            <input
+              type="number"
+              step="0.125"
+              min="0.125"
+              defaultValue={task.duration}
+              className="w-20 px-2 py-1 border border-gray-300 rounded text-center text-sm text-gray-900 bg-white"
+              onDoubleClick={(e) => e.currentTarget.select()}
+              onBlur={(e) => updateTask(task.id, 'duration', e.target.value)}
+            />
+          </td>
+
+          {/* Data Início */}
+          <td className="px-4 py-2 text-center">
+            <input
+              type="date"
+              defaultValue={task.start_date || ''}
+              className="border border-gray-300 rounded px-2 py-1 text-sm text-gray-900 bg-white"
+              onBlur={(e) => updateTask(task.id, 'start_date', e.target.value)}
+            />
+          </td>
+
+          {/* Data Fim */}
+          <td className="px-4 py-2 text-center">
+            <input
+              type="date"
+              defaultValue={task.end_date || ''}
+              className="border border-gray-300 rounded px-2 py-1 text-sm text-gray-900 bg-white"
+              onBlur={(e) => updateTask(task.id, 'end_date', e.target.value)}
+            />
+          </td>
+
+          {/* Pessoas */}
+          <td className="px-4 py-2">
+            <div className="flex flex-wrap gap-1">
+              {taskAllocations.map(alloc => {
+                const resource = resources.find(r => r.id === alloc.resource_id)
+                return (
+                  <span
+                    key={alloc.id}
+                    className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700"
+                  >
+                    {resource?.name || 'N/A'}
+                  </span>
+                )
+              })}
+              {taskAllocations.length === 0 && (
+                <span className="text-xs text-gray-400">Nenhuma</span>
+              )}
+            </div>
+          </td>
+
+          {/* Progresso */}
+          <td className="px-4 py-2">
+            <div className="flex items-center space-x-2">
+              <div className="flex-1 bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-blue-600 h-2 rounded-full"
+                  style={{ width: `${task.progress}%` }}
+                />
+              </div>
+              <span className="text-xs text-gray-600 w-10 text-right">
+                {task.progress}%
+              </span>
+            </div>
+          </td>
+
+          {/* Custo Estimado */}
+          <td className="px-4 py-2 text-right">
+            {hasSubtasks ? (
+              <div className="flex items-center justify-end gap-1">
+                <span className="text-xs text-gray-500">R$</span>
+                <span className="bg-green-50 text-green-700 px-2 py-1 rounded text-sm font-semibold">
+                  {totalEstimatedCost.toFixed(2)}
+                </span>
+                <span className="text-xs text-gray-400" title="Soma das subtarefas">
+                  (Σ)
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-end gap-1">
+                <span className="text-xs text-gray-500">R$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  defaultValue={task.estimated_cost || ''}
+                  placeholder="0,00"
+                  className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm text-gray-900 bg-white"
+                  onBlur={(e) => updateTask(task.id, 'estimated_cost', e.target.value)}
+                />
+              </div>
+            )}
+          </td>
+
+          {/* Custo Real */}
+          <td className="px-4 py-2 text-right">
+            {hasSubtasks ? (
+              <div className="flex items-center justify-end gap-1">
+                <span className="text-xs text-gray-500">R$</span>
+                <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-sm font-semibold">
+                  {totalActualCost.toFixed(2)}
+                </span>
+                <span className="text-xs text-gray-400" title="Soma das subtarefas">
+                  (Σ)
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-end gap-1">
+                <span className="text-xs text-gray-500">R$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  defaultValue={task.actual_cost || ''}
+                  placeholder="0,00"
+                  className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm text-gray-900 bg-white"
+                  onBlur={(e) => updateTask(task.id, 'actual_cost', e.target.value)}
+                />
+              </div>
+            )}
+          </td>
+
+          {/* Ações */}
+          <td className="px-4 py-2">
+            <div className="flex gap-2 justify-center">
+              <button
+                onClick={() => setAddingSubtaskToTask(task.id)}
+                className="text-green-600 hover:text-green-700"
+                title="Adicionar subtarefa"
+              >
+                ➕
+              </button>
+              <button
+                onClick={() => deleteTask(task.id, task.name, hasSubtasks)}
+                className="text-red-600 hover:text-red-700"
+                title="Excluir tarefa"
+              >
+                🗑️
+              </button>
+            </div>
+          </td>
+        </tr>
+
+        {/* Linha para adicionar nova subtarefa (DENTRO da recursão) */}
+        {addingSubtaskToTask === task.id && (
+          <tr className="bg-green-50 border-2 border-green-500">
+            <td className="px-4 py-2 text-xs text-gray-500">-</td>
+            <td className="px-4 py-2">
+              <div
+                className="flex items-center gap-2"
+                style={{ paddingLeft: `${indent + 30}px` }}
+              >
+                <span className="text-gray-400">└─</span>
+                <input
+                  type="text"
+                  placeholder="Nome da subtarefa..."
+                  value={newSubtaskData.name}
+                  onChange={(e) => setNewSubtaskData({ ...newSubtaskData, name: e.target.value })}
+                  className="flex-1 border border-green-500 rounded px-2 py-1 text-sm text-gray-900 bg-white focus:ring-2 focus:ring-green-500"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') createNewSubtask(task.id, task.type)
+                    if (e.key === 'Escape') cancelNewSubtask()
+                  }}
+                />
+              </div>
+            </td>
+            <td className="px-4 py-2">
+              <span className="text-sm text-gray-600">subtarefa</span>
+            </td>
+            <td className="px-4 py-2 text-center">
+              <input
+                type="number"
+                step="0.125"
+                min="0.125"
+                value={newSubtaskData.duration}
+                onChange={(e) => setNewSubtaskData({ ...newSubtaskData, duration: parseFloat(e.target.value) })}
+                className="w-20 px-2 py-1 border border-gray-300 rounded text-center text-sm text-gray-900 bg-white"
+              />
+            </td>
+            <td className="px-4 py-2 text-center text-xs text-gray-400">Calculado</td>
+            <td className="px-4 py-2 text-center text-xs text-gray-400">Calculado</td>
+            <td className="px-4 py-2 text-xs text-gray-400">Nenhuma</td>
+            <td className="px-4 py-2 text-xs text-gray-400">0%</td>
+            <td className="px-4 py-2 text-xs text-gray-400">-</td>
+            <td className="px-4 py-2 text-xs text-gray-400">-</td>
+            <td className="px-4 py-2">
+              <div className="flex gap-2 justify-center">
+                <button
+                  onClick={() => createNewSubtask(task.id, task.type)}
+                  className="text-green-600 hover:text-green-700"
+                  title="Salvar (Enter)"
+                >
+                  ✅
+                </button>
+                <button
+                  onClick={cancelNewSubtask}
+                  className="text-red-600 hover:text-red-700"
+                  title="Cancelar (Esc)"
+                >
+                  ❌
+                </button>
+              </div>
+            </td>
+          </tr>
+        )}
+
+        {/* RECURSÃO: Renderizar subtarefas */}
+        {subtasks.map(subtask => (
+          <TaskRow
+            key={subtask.id}
+            task={subtask}
+            level={level + 1}
+            allTasks={allTasks}
+          />
+        ))}
+      </>
+    )
+  }
 
   return (
     <>
@@ -505,7 +753,7 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
         {/* Botão de ordem */}
         <button
           onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-          className="p-2 border border-red-300 rounded hover:bg-red-500 bg-gray-800"
+          className="p-2 border border-gray-300 rounded hover:bg-gray-50 bg-white text-gray-700"
           title={sortOrder === 'asc' ? 'Crescente' : 'Decrescente'}
         >
           {sortOrder === 'asc' ? '↑' : '↓'}
@@ -525,6 +773,9 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
         <table className="w-full">
           <thead className="bg-gray-50">
             <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                WBS
+              </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
                 Tarefa
               </th>
@@ -547,392 +798,38 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
                 Progresso
               </th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-  Custo Est.
-</th>
-<th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-  Custo Real
-</th>
-<th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-  Ações
-</th>
+                Custo Est.
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                Custo Real
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                Ações
+              </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {mainTasks.map((task) => {
+            {/* Renderizar apenas tarefas de NÍVEL 1 (sem parent_id) usando recursão */}
+            {mainTasks.map(task => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                level={0}
+                allTasks={tasks}
+              />
+            ))}
 
-              const taskAllocations = allocations.filter(a => a.task_id === task.id)
-              const subtasks = tasks.filter(t => t.parent_id === task.id)
-              const totalEstimatedCost = subtasks.reduce((sum, sub) => sum + (sub.estimated_cost || 0), 0)
-    const totalActualCost = subtasks.reduce((sum, sub) => sum + (sub.actual_cost || 0), 0)
-              return (
-                <React.Fragment key={task.id}>
-                  <tr className={`hover:opacity-90 transition-all ${getTaskColors(task.type, false)}`}>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex items-center">
-                        {task.parent_id && (
-                          <span className="text-gray-400 mr-2">└</span>
-                        )}
-                        <input
-                          type="text"
-                          defaultValue={task.name}
-                          className="border-0 bg-white text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 w-full"
-                          onDoubleClick={(e) => e.currentTarget.select()}
-                          onBlur={(e) => updateTask(task.id, 'name', e.target.value)}
-
-                        />
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-sm text-gray-600">
-                        {task.type.replace(/_/g, ' ')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <input
-                        type="number"
-                        defaultValue={task.duration}
-                        className="border border-gray-300 rounded px-2 py-1 w-20 text-sm text-gray-900 bg-white"
-                        onDoubleClick={(e) => e.currentTarget.select()}
-                          onBlur={(e) => updateTask(task.id, 'duration', e.target.value)}
-
-                      />
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <input
-                        type="date"
-                        defaultValue={task.start_date || ''}
-                        className="border border-gray-300 rounded px-2 py-1 text-sm text-gray-900 bg-white"
-                        onBlur={(e) => updateTask(task.id, 'start_date', e.target.value)}
-
-                      />
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <input
-                        type="date"
-                        defaultValue={task.end_date || ''}
-                        className="border border-gray-300 rounded px-2 py-1 text-sm text-gray-900 bg-white"
-                        onBlur={(e) => updateTask(task.id, 'end_date', e.target.value)}
-
-                      />
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex flex-wrap gap-1">
-                        {taskAllocations.map(alloc => {
-                          const resource = resources.find(r => r.id === alloc.resource_id)
-                          return (
-                            <span
-                              key={alloc.id}
-                              className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700"
-                            >
-                              {resource?.name || 'N/A'}
-                            </span>
-                          )
-                        })}
-                        <button className="text-xs text-blue-600 hover:text-blue-700">
-                          + Adicionar
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex items-center space-x-2">
-                        <div className="flex-1 bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-blue-600 h-2 rounded-full"
-                            style={{ width: `${task.progress}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-gray-600 w-10 text-right">
-                          {task.progress}%
-                        </span>
-                      </div>
-                    </td>
-
-{/* Custo Estimado - Soma das subtarefas */}
-<td className="px-4 py-3 whitespace-nowrap">
-  {subtasks.length > 0 ? (
-    // Se tem subtarefas, mostrar soma (não editável)
-    <div className="flex items-center gap-1">
-      <span className="text-xs text-gray-500">R$</span>
-      <span className="text-sm font-semibold text-green-700 bg-green-50 px-3 py-1 rounded">
-        {totalEstimatedCost.toFixed(2).replace('.', ',')}
-      </span>
-      <span className="text-xs text-gray-400" title="Soma das subtarefas">
-        (Σ)
-      </span>
-    </div>
-  ) : (
-    // Se não tem subtarefas, input editável
-    <div className="flex items-center gap-1">
-      <span className="text-xs text-gray-500">R$</span>
-      <input
-        type="number"
-        defaultValue={task.estimated_cost || ''}
-        placeholder="0,00"
-        className="border border-gray-300 rounded px-2 py-1 w-24 text-sm text-gray-900 bg-white"
-        step="0.01"
-        min="0"
-        onBlur={(e) => updateTask(task.id, 'estimated_cost', e.target.value)}
-      />
-    </div>
-  )}
-</td>
-
-{/* Custo Real - Soma das subtarefas */}
-<td className="px-4 py-3 whitespace-nowrap">
-  {subtasks.length > 0 ? (
-    // Se tem subtarefas, mostrar soma (não editável)
-    <div className="flex items-center gap-1">
-      <span className="text-xs text-gray-500">R$</span>
-      <span className="text-sm font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded">
-        {totalActualCost.toFixed(2).replace('.', ',')}
-      </span>
-      <span className="text-xs text-gray-400" title="Soma das subtarefas">
-        (Σ)
-      </span>
-    </div>
-  ) : (
-    // Se não tem subtarefas, input editável
-    <div className="flex items-center gap-1">
-      <span className="text-xs text-gray-500">R$</span>
-      <input
-        type="number"
-        defaultValue={task.actual_cost || ''}
-        placeholder="0,00"
-        className="border border-gray-300 rounded px-2 py-1 w-24 text-sm text-gray-900 bg-white"
-        step="0.01"
-        min="0"
-        onBlur={(e) => updateTask(task.id, 'actual_cost', e.target.value)}
-      />
-    </div>
-  )}
-</td>
-
-                    <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
-  <button
-    onClick={() => setAddingSubtaskToTask(task.id)}
-    className="text-green-600 hover:text-green-700 mr-2"
-    title="Adicionar Subtarefa"
-  >
-    ➕
-  </button>
-  <button className="text-blue-600 hover:text-blue-700 mr-2">
-    ✏️
-  </button>
-  <button
-  onClick={() => deleteTask(task.id, task.name, subtasks.length > 0)}
-  className="text-red-600 hover:text-red-700"
-  title="Excluir Tarefa"
->
-  🗑️
-</button>
-</td>
-                  </tr>
-                  {subtasks.map((subtask: Task) => {
-                    const colorType = subtask.type === 'subtarefa' ? task.type : subtask.type
-                    return (
-                      <tr key={subtask.id} className={`hover:opacity-90 transition-all ${getTaskColors(colorType, true)}`}>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <span className="text-gray-400 mr-2">└</span>
-                            <input
-                              type="text"
-                              defaultValue={subtask.name}
-                              className="border-0 bg-transparent text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 w-full"
-                              onDoubleClick={(e) => e.currentTarget.select()}
-                              onBlur={(e) => updateTask(subtask.id, 'name', e.target.value)}
-
-                            />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className="text-sm text-gray-600">
-                            {subtask.type.replace(/_/g, ' ')}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <input
-                            type="number"
-                            defaultValue={subtask.duration}
-                            className="border border-gray-300 rounded px-2 py-1 w-20 text-sm text-gray-900 bg-white"
-                            onDoubleClick={(e) => e.currentTarget.select()}
-                            onBlur={(e) => updateTask(subtask.id, 'duration', e.target.value)}
-
-                          />
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <input
-                            type="date"
-                            defaultValue={subtask.start_date || ''}
-                            className="border border-gray-300 rounded px-2 py-1 text-sm text-gray-900 bg-white"
-                            onBlur={(e) => updateTask(subtask.id, 'start_date', e.target.value)}
-                          />
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <input
-                            type="date"
-                            defaultValue={subtask.end_date || ''}
-                            className="border border-gray-300 rounded px-2 py-1 text-sm text-gray-900 bg-white"
-                            onBlur={(e) => updateTask(subtask.id, 'end_date', e.target.value)}
-                          />
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex flex-wrap gap-1">
-                            {taskAllocations.map(alloc => {
-                              const resource = resources.find(r => r.id === alloc.resource_id)
-                              return (
-                                <span
-                                  key={alloc.id}
-                                  className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700"
-                                >
-                                  {resource?.name || 'N/A'}
-                                </span>
-                              )
-                            })}
-                            <button className="text-xs text-blue-600 hover:text-blue-700">
-                              + Adicionar
-                            </button>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center space-x-2">
-                            <div className="flex-1 bg-gray-200 rounded-full h-2">
-                              <div
-                                className="bg-blue-600 h-2 rounded-full"
-                                style={{ width: `${subtask.progress}%` }}
-                              />
-                            </div>
-                            <span className="text-xs text-gray-600 w-10 text-right">
-                              {subtask.progress}%
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* Custo Estimado */}
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-gray-500">R$</span>
-                            <input
-                              type="number"
-                              defaultValue={subtask.estimated_cost || ''}
-                              placeholder="0,00"
-                              className="border border-gray-300 rounded px-2 py-1 w-24 text-sm text-gray-900 bg-white"
-                              step="0.01"
-                              min="0"
-                              onBlur={(e) => updateTask(subtask.id, 'estimated_cost', e.target.value)}
-                            />
-                          </div>
-                        </td>
-
-                        {/* Custo Real */}
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-gray-500">R$</span>
-                            <input
-                              type="number"
-                              defaultValue={subtask.actual_cost || ''}
-                              placeholder="0,00"
-                              className="border border-gray-300 rounded px-2 py-1 w-24 text-sm text-gray-900 bg-white"
-                              step="0.01"
-                              min="0"
-                              onBlur={(e) => updateTask(subtask.id, 'actual_cost', e.target.value)}
-                            />
-                          </div>
-                        </td>
-
-                        <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
-                          <button className="text-blue-600 hover:text-blue-700 mr-2">
-                            ✏️
-                          </button>
-                          <button
-  onClick={() => deleteSubtask(subtask.id, subtask.name)}
-  className="text-red-600 hover:text-red-700"
-  title="Excluir Subtarefa"
->
-  🗑️
-</button>
-                        </td>
-                      </tr>
-                    )
-                                  })}
-                
-                {/* ADICIONE ESTA LINHA - Nova subtarefa */}
-                {addingSubtaskToTask === task.id && (
-                  <tr className="bg-green-50 border-2 border-green-500">
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <span className="text-gray-400 mr-2">└</span>
-                        <input
-                          type="text"
-                          placeholder="Nome da subtarefa..."
-                          value={newSubtaskData.name}
-                          onChange={(e) => setNewSubtaskData({ ...newSubtaskData, name: e.target.value })}
-                          className="border border-green-500 rounded px-2 py-1 w-full text-sm text-gray-900 bg-white focus:ring-2 focus:ring-green-500"
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') createNewSubtask(task.id, task.type)
-                            if (e.key === 'Escape') cancelNewSubtask()
-                          }}
-                        />
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-sm text-gray-600">subtarefa</span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <input
-                        type="number"
-                        value={newSubtaskData.duration}
-                        onChange={(e) => setNewSubtaskData({ ...newSubtaskData, duration: parseFloat(e.target.value) })}
-                        className="border border-gray-300 rounded px-2 py-1 w-20 text-sm text-gray-900 bg-white"
-                        min="0.5"
-                        step="0.5"
-                      />
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-gray-400">
-                      <span className="text-xs">Calculado</span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-gray-400">
-                      <span className="text-xs">Calculado</span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs text-gray-400">Nenhuma</span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs text-gray-400">0%</span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
-                      <button
-                        onClick={() => createNewSubtask(task.id, task.type)}
-                        className="text-green-600 hover:text-green-700 mr-2"
-                        title="Salvar (Enter)"
-                      >
-                        ✅
-                      </button>
-                      <button
-                        onClick={cancelNewSubtask}
-                        className="text-red-600 hover:text-red-700"
-                        title="Cancelar (Esc)"
-                      >
-                        ❌
-                      </button>
-                    </td>
-                  </tr>
-                )}
-                
-              </React.Fragment>
-              )
-            })}
-            
-            {/* ADICIONE ESTA LINHA - Nova tarefa */}
+            {/* Linha para adicionar nova tarefa principal */}
             {isAddingTask && (
               <tr className="bg-green-50 border-2 border-green-500">
-                <td className="px-4 py-3 whitespace-nowrap">
+                <td className="px-4 py-2 text-xs text-gray-500">-</td>
+                <td className="px-4 py-2">
                   <input
                     type="text"
                     placeholder="Nome da tarefa..."
                     value={newTaskData.name}
                     onChange={(e) => setNewTaskData({ ...newTaskData, name: e.target.value })}
-                    className="border border-green-500 rounded px-2 py-1 w-full text-sm text-gray-900 bg-white focus:ring-2 focus:ring-green-500"
+                    className="w-full border border-green-500 rounded px-2 py-1 text-sm text-gray-900 bg-white focus:ring-2 focus:ring-green-500"
                     autoFocus
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') createNewTask()
@@ -940,7 +837,7 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
                     }}
                   />
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">
+                <td className="px-4 py-2">
                   <select
                     value={newTaskData.type}
                     onChange={(e) => setNewTaskData({ ...newTaskData, type: e.target.value })}
@@ -955,48 +852,46 @@ async function deleteSubtask(subtaskId: string, subtaskName: string) {
                     <option value="montagem_mecanica">Montagem Mecânica</option>
                     <option value="montagem_eletrica">Montagem Elétrica</option>
                     <option value="coleta">Coleta</option>
+                    <option value="subtarefa">Subtarefa</option>
                   </select>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">
+                <td className="px-4 py-2 text-center">
                   <input
                     type="number"
+                    step="0.125"
+                    min="0.125"
                     value={newTaskData.duration}
                     onChange={(e) => setNewTaskData({ ...newTaskData, duration: parseFloat(e.target.value) })}
-                    className="border border-gray-300 rounded px-2 py-1 w-20 text-sm text-gray-900 bg-white"
-                    min="0.5"
-                    step="0.5"
+                    className="w-20 px-2 py-1 border border-gray-300 rounded text-center text-sm text-gray-900 bg-white"
                   />
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-gray-400">
-                  <span className="text-xs">Calculado</span>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap text-gray-400">
-                  <span className="text-xs">Calculado</span>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <span className="text-xs text-gray-400">Nenhuma</span>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
-                  <span className="text-xs text-gray-400">0%</span>
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap text-right text-sm">
-                  <button
-                    onClick={createNewTask}
-                    className="text-green-600 hover:text-green-700 mr-2"
-                    title="Salvar (Enter)"
-                  >
-                    ✅
-                  </button>
-                  <button
-                    onClick={cancelNewTask}
-                    className="text-red-600 hover:text-red-700"
-                    title="Cancelar (Esc)"
-                  >
-                    ❌
-                  </button>
+                <td className="px-4 py-2 text-center text-xs text-gray-400">Calculado</td>
+                <td className="px-4 py-2 text-center text-xs text-gray-400">Calculado</td>
+                <td className="px-4 py-2 text-xs text-gray-400">Nenhuma</td>
+                <td className="px-4 py-2 text-xs text-gray-400">0%</td>
+                <td className="px-4 py-2 text-xs text-gray-400">-</td>
+                <td className="px-4 py-2 text-xs text-gray-400">-</td>
+                <td className="px-4 py-2">
+                  <div className="flex gap-2 justify-center">
+                    <button
+                      onClick={createNewTask}
+                      className="text-green-600 hover:text-green-700"
+                      title="Salvar (Enter)"
+                    >
+                      ✅
+                    </button>
+                    <button
+                      onClick={cancelNewTask}
+                      className="text-red-600 hover:text-red-700"
+                      title="Cancelar (Esc)"
+                    >
+                      ❌
+                    </button>
+                  </div>
                 </td>
               </tr>
-            )}</tbody>
+            )}
+          </tbody>
         </table>
       </div>
 
