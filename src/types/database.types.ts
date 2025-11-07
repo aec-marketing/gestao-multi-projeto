@@ -15,6 +15,7 @@ export type Database = {
           buffer_days: number
           start_date: string | null
           end_date: string | null
+          target_end_date: string | null  // Data alvo/limite do projeto
           is_active: boolean
           notes: string | null
               estimated_cost: number        // ← ADICIONE
@@ -22,30 +23,27 @@ export type Database = {
               outline_level: number        // Nível hierárquico (1, 2, 3...)
           wbs_code: string | null      // Código WBS (1, 1.1, 1.1.1)
           is_summary: boolean          // É tarefa sumária?
-          
+
           created_at: string
           updated_at: string
         }
         Insert: {
           id?: string
-          project_id: string
+          code: string
           name: string
-          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa'
-          parent_id?: string | null
-          duration?: number
+          category: 'laudo_tecnico' | 'projeto_mecanico' | 'projeto_eletrico' | 'projeto_mecanico_eletrico' | 'projeto_completo' | 'manutencao' | 'readequacao' | 'retrofit'
+          vendor_name: string
+          leader_id?: string | null
+          template_id?: string | null
+          complexity: 'simples' | 'padrao' | 'complexo'
+          buffer_days?: number
           start_date?: string | null
           end_date?: string | null
-          is_optional?: boolean
-          is_critical_path?: boolean
-          progress?: number
+          target_end_date?: string | null
+          is_active?: boolean
           notes?: string | null
-          sort_order?: number
           estimated_cost?: number
           actual_cost?: number
-          margin_start?: number
-          margin_end?: number
-          
-          // ===== ADICIONAR ESTES 3 CAMPOS =====
           outline_level?: number
           wbs_code?: string | null
           is_summary?: boolean
@@ -62,6 +60,7 @@ export type Database = {
           buffer_days?: number
           start_date?: string | null
           end_date?: string | null
+          target_end_date?: string | null  // Data alvo/limite do projeto
           is_active?: boolean
           notes?: string | null
               estimated_cost?: number       // ← ADICIONE

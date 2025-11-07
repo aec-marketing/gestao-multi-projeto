@@ -9,6 +9,9 @@ import TableViewTab from '@/components/project-views/TableViewTab'
 import TimelineViewTab from './project-views/TimelineViewTab'
 import FinancialViewTab from '@/components/project-views/FinancialViewTab'
 import PredecessorViewTab from './project-views/PredecessorViewTab'
+import EditProjectButton from '@/components/modals/EditProjectButton'
+import { BufferStatusIndicator } from '@/components/gantt/BufferBar'
+import { recalculateProjectEndDate } from '@/lib/project-service'
 
 interface ProjectGanttPageProps {
   projectId: string
@@ -33,6 +36,9 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
   async function loadProjectData() {
     setLoading(true)
     try {
+      // Recalcular end_date do projeto antes de carregar
+      await recalculateProjectEndDate(projectId)
+
       // Carregar projeto
       const { data: projectData } = await supabase
         .from('projects')
@@ -123,10 +129,12 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
                   {project.code} • {tasks.length} tarefas
                 </p>
               </div>
+              <BufferStatusIndicator project={project} tasks={tasks} />
             </div>
 
             {/* Ações rápidas */}
             <div className="flex items-center space-x-3">
+              <EditProjectButton project={project} tasks={tasks} onRefresh={onRefresh} />
               <button className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                 💾 Salvar
               </button>

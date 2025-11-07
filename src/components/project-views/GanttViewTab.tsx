@@ -12,6 +12,7 @@ import { recalculateTasksInCascade, validateTaskStartDate, auditPredecessorConfl
 import RecalculateModal from '@/components/modals/RecalculateModal'
 import CycleAuditModal from '@/components/modals/CycleAuditModal'
 import { detectCycles } from '@/lib/msproject/validation'
+import { calculateProjectBuffer } from '@/lib/buffer-utils'
 
 
 interface GanttViewTabProps {
@@ -366,16 +367,30 @@ const [predecessors, setPredecessors] = useState<any[]>([])
     isExpanded: t.isExpanded
   })))
 
-  // Criar grid de datas
+  // Criar grid de datas (apenas para tarefas reais, sem buffer)
   const allDates = tasksWithDates.flatMap(t => [t.start_date, t.end_date])
   const minDate = allDates.length > 0 ? new Date(Math.min(...allDates.map(d => d.getTime()))) : new Date()
   const maxDate = allDates.length > 0 ? new Date(Math.max(...allDates.map(d => d.getTime()))) : new Date()
-  
+
+  // Criar dateGrid apenas com datas de tarefas
   const dateGrid: Date[] = []
   const current = new Date(minDate)
   while (current <= maxDate) {
     dateGrid.push(new Date(current))
     current.setDate(current.getDate() + 1)
+  }
+
+  // Criar dateGrid estendido para renderização (incluindo buffer)
+  let maxDateWithBuffer = new Date(maxDate)
+  if (project.buffer_days && project.buffer_days > 0) {
+    maxDateWithBuffer.setDate(maxDateWithBuffer.getDate() + project.buffer_days)
+  }
+
+  const dateGridWithBuffer: Date[] = []
+  const currentWithBuffer = new Date(minDate)
+  while (currentWithBuffer <= maxDateWithBuffer) {
+    dateGridWithBuffer.push(new Date(currentWithBuffer))
+    currentWithBuffer.setDate(currentWithBuffer.getDate() + 1)
   }
 
   // Função para calcular estilo da barra
@@ -1178,17 +1193,22 @@ useEffect(() => {
         <div className="relative h-20 border-r flex-1">
           {/* Grid de fundo */}
           <div className="absolute inset-0 flex">
-            {dateGrid.map((date, index) => {
+            {dateGridWithBuffer.map((date, index) => {
               const columnWidth = getColumnWidth()
               const dateKey = date.toISOString().split('T')[0]
               const isSelected = selectedDay === dateKey
               const isToday = date.toDateString() === new Date().toDateString()
 
+              // Verificar se esta coluna está na área de buffer
+              const isBufferColumn = date > maxDate
+
               return (
                 <div
                   key={index}
                   className={`border-r ${
-                    isSelected
+                    isBufferColumn
+                      ? 'bg-gray-50 border-gray-200'
+                      : isSelected
                       ? 'bg-blue-50 border-blue-300 border-r-2'
                       : isToday
                       ? 'bg-yellow-50 border-yellow-200'
@@ -1486,11 +1506,14 @@ useEffect(() => {
                 Tarefa
               </div>
               <div className="flex">
-                {dateGrid.map((date, index) => {
+                {dateGridWithBuffer.map((date, index) => {
                   const columnWidth = getColumnWidth()
                   const dateKey = date.toISOString().split('T')[0]
                   const isSelected = selectedDay === dateKey
                   const isToday = date.toDateString() === new Date().toDateString()
+
+                  // Verificar se esta coluna está na área de buffer
+                  const isBufferColumn = date > maxDate
 
                   // Ajustar espaçamento e fonte baseado no zoom
                   const padding = zoomLevel === 'month' ? 'px-0.5 py-1' : zoomLevel === 'day' ? 'px-4 py-2' : 'px-2 py-2'
@@ -1500,7 +1523,9 @@ useEffect(() => {
                     <div
                       key={index}
                       className={`border-r text-center cursor-pointer transition-colors ${padding} ${
-                        isSelected
+                        isBufferColumn
+                          ? 'bg-green-50 border-green-200 font-semibold'
+                          : isSelected
                           ? 'bg-blue-100 border-blue-400 border-2'
                           : isToday
                           ? 'bg-yellow-50'
@@ -1533,6 +1558,94 @@ useEffect(() => {
             <div className="relative">
               {/* Linhas de tarefas */}
               {organizedTasks.map((task) => renderTaskRecursive(task, 0))}
+
+              {/* ========== Buffer Visual ========== */}
+              {(() => {
+                // Calcular informações do buffer
+                const bufferInfo = calculateProjectBuffer(project, tasks)
+                const columnWidth = getColumnWidth()
+
+                // Se não há buffer configurado, não renderizar
+                if (!project.buffer_days || project.buffer_days === 0) return null
+
+                // Encontrar a última tarefa para posicionar o buffer
+                const lastTaskEndDate = bufferInfo.realEndDate
+                const bufferEndDate = bufferInfo.bufferEndDate
+
+                // Buffer deve começar NO DIA SEGUINTE ao fim da última tarefa
+                const bufferStartDate = new Date(lastTaskEndDate)
+                bufferStartDate.setDate(bufferStartDate.getDate() + 1)
+
+                // Calcular posição: encontrar índice do bufferStartDate no dateGridWithBuffer
+                const bufferStartIndex = dateGridWithBuffer.findIndex(d =>
+                  d.toISOString().split('T')[0] === bufferStartDate.toISOString().split('T')[0]
+                )
+
+                const bufferDays = project.buffer_days
+                // Se encontrou o índice, usar ele; senão calcular manualmente
+                const bufferStartPx = bufferStartIndex >= 0
+                  ? (bufferStartIndex * columnWidth) + 320
+                  : (dateGrid.length * columnWidth) + 320 // Posição após todas as tarefas
+                const bufferWidthPx = bufferDays * columnWidth
+
+                // Debug log
+                console.log('🔍 Buffer Debug:', {
+                  lastTaskEndDate: lastTaskEndDate.toLocaleDateString('pt-BR'),
+                  bufferStartDate: bufferStartDate.toLocaleDateString('pt-BR'),
+                  bufferStartIndex,
+                  dateGridLength: dateGrid.length,
+                  dateGridWithBufferLength: dateGridWithBuffer.length,
+                  bufferStartPx,
+                  bufferWidthPx,
+                  columnWidth
+                })
+
+                // Determinar cor baseada no status
+                let bufferColor = 'bg-green-200'
+                let borderColor = 'border-green-400'
+                let pattern = 'bg-pattern-dots'
+                let statusText = 'Buffer Seguro'
+                let statusIcon = '✅'
+
+                if (bufferInfo.bufferStatus === 'exceeded') {
+                  bufferColor = 'bg-red-200'
+                  borderColor = 'border-red-400'
+                  pattern = 'bg-pattern-cross'
+                  statusText = 'Buffer Excedido'
+                  statusIcon = '🔴'
+                } else if (bufferInfo.bufferStatus === 'consumed') {
+                  bufferColor = 'bg-yellow-200'
+                  borderColor = 'border-yellow-400'
+                  pattern = 'bg-pattern-diagonal'
+                  statusText = 'Buffer Consumido'
+                  statusIcon = '🟡'
+                }
+
+                return (
+                  <div
+                    className="absolute top-0 h-full pointer-events-none z-10"
+                    style={{ left: `${bufferStartPx}px`, width: `${bufferWidthPx}px` }}
+                  >
+                    {/* Barra visual do buffer */}
+                    <div
+                      className={`h-full ${bufferColor} ${borderColor} ${pattern} border-l-4 border-r-4 border-dashed opacity-60`}
+                      title={`${statusText}: ${project.buffer_days} dias`}
+                    >
+                      {/* Label do buffer no topo */}
+                      <div className="sticky top-0 flex items-center justify-center pt-2">
+                        <div className={`px-3 py-1 rounded-full text-xs font-semibold shadow-lg pointer-events-auto
+                          ${bufferInfo.bufferStatus === 'safe' ? 'bg-green-600 text-white border-2 border-green-700' : ''}
+                          ${bufferInfo.bufferStatus === 'consumed' ? 'bg-yellow-600 text-white border-2 border-yellow-700' : ''}
+                          ${bufferInfo.bufferStatus === 'exceeded' ? 'bg-red-600 text-white border-2 border-red-700' : ''}
+                        `}>
+                          <span className="mr-1">{statusIcon}</span>
+                          Buffer: {project.buffer_days}d
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* Linhas de Predecessores - overlay absoluto */}
               <PredecessorLines
