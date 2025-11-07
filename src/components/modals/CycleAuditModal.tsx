@@ -58,7 +58,6 @@ export default function CycleAuditModal({
       }
 
     } catch (error) {
-      console.error('Erro ao escanear ciclos:', error)
       alert('Erro ao escanear ciclos')
     } finally {
       setScanning(false)
@@ -82,7 +81,6 @@ export default function CycleAuditModal({
       onRefresh()
       scanForCycles() // Re-escanear
     } catch (error) {
-      console.error('Erro ao remover predecessor:', error)
       alert('Erro ao remover predecessor')
     }
   }

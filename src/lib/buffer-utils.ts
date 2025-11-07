@@ -83,12 +83,6 @@ function calculateRealEndDate(tasks: Task[], projectStartDate: string | null): D
     }
   })
 
-  console.log('📅 Última tarefa encontrada:', {
-    taskName: latestTaskName,
-    endDate: latestEndDate.toLocaleDateString('pt-BR'),
-    totalTasks: tasks.length
-  })
-
   return latestEndDate
 }
 

@@ -28,9 +28,7 @@ export async function updateProject(
   data: EditProjectData
 ): Promise<UpdateResult> {
   try {
-    console.log('📝 [updateProject] Atualizando projeto:', projectId, data)
-
-    // 1. Validar dados críticos
+    // Validar dados críticos
     if (data.code) {
       // Verificar se código já existe (exceto para o próprio projeto)
       const { data: existingProject } = await supabase
@@ -48,25 +46,22 @@ export async function updateProject(
       }
     }
 
-    // 2. Executar update
+    // Executar update
     const { error } = await supabase
       .from('projects')
       .update(data)
       .eq('id', projectId)
 
     if (error) {
-      console.error('❌ [updateProject] Erro do Supabase:', error)
       return {
         success: false,
         error: `Erro ao atualizar projeto: ${error.message}`
       }
     }
 
-    console.log('✅ [updateProject] Projeto atualizado com sucesso')
     return { success: true }
 
   } catch (err) {
-    console.error('❌ [updateProject] Erro interno:', err)
     return {
       success: false,
       error: 'Erro interno do servidor'
@@ -87,13 +82,11 @@ export async function getAvailableLeaders() {
       .order('name')
 
     if (error) {
-      console.error('❌ [getAvailableLeaders] Erro:', error)
       return []
     }
 
     return leaders || []
   } catch (err) {
-    console.error('❌ [getAvailableLeaders] Erro interno:', err)
     return []
   }
 }
@@ -121,7 +114,6 @@ export async function validateStartDateChange(
       tasksCount: tasks?.length || 0
     }
   } catch (err) {
-    console.error('❌ [validateStartDateChange] Erro:', err)
     return { hasTasksInProgress: false, tasksCount: 0 }
   }
 }
@@ -131,9 +123,7 @@ export async function validateStartDateChange(
  */
 export async function recalculateProjectEndDate(projectId: string): Promise<UpdateResult> {
   try {
-    console.log('🔄 [recalculateProjectEndDate] Recalculando end_date do projeto:', projectId)
-
-    // 1. Buscar projeto e tarefas
+    // Buscar projeto e tarefas
     const { data: project, error: projectError } = await supabase
       .from('projects')
       .select('id, start_date')
@@ -141,7 +131,6 @@ export async function recalculateProjectEndDate(projectId: string): Promise<Upda
       .single()
 
     if (projectError || !project) {
-      console.error('❌ [recalculateProjectEndDate] Erro ao buscar projeto:', projectError)
       return { success: false, error: 'Projeto não encontrado' }
     }
 
@@ -151,11 +140,10 @@ export async function recalculateProjectEndDate(projectId: string): Promise<Upda
       .eq('project_id', projectId)
 
     if (tasksError) {
-      console.error('❌ [recalculateProjectEndDate] Erro ao buscar tarefas:', tasksError)
       return { success: false, error: 'Erro ao buscar tarefas' }
     }
 
-    // 2. Encontrar a última data de fim entre as tarefas
+    // Encontrar a última data de fim entre as tarefas
     let latestEndDate: Date | undefined = undefined
 
     if (tasks && tasks.length > 0) {
@@ -177,7 +165,7 @@ export async function recalculateProjectEndDate(projectId: string): Promise<Upda
       })
     }
 
-    // 3. Atualizar project.end_date
+    // Atualizar project.end_date
     if (latestEndDate) {
       const endDateString = (latestEndDate as Date).toISOString().split('T')[0]
 
@@ -187,11 +175,9 @@ export async function recalculateProjectEndDate(projectId: string): Promise<Upda
         .eq('id', projectId)
 
       if (updateError) {
-        console.error('❌ [recalculateProjectEndDate] Erro ao atualizar end_date:', updateError)
         return { success: false, error: 'Erro ao atualizar data de fim' }
       }
 
-      console.log('✅ [recalculateProjectEndDate] End_date atualizada para:', endDateString)
       return { success: true }
     } else {
       // Se não há tarefas ou datas, limpar end_date
@@ -201,16 +187,13 @@ export async function recalculateProjectEndDate(projectId: string): Promise<Upda
         .eq('id', projectId)
 
       if (updateError) {
-        console.error('❌ [recalculateProjectEndDate] Erro ao limpar end_date:', updateError)
         return { success: false, error: 'Erro ao limpar data de fim' }
       }
 
-      console.log('✅ [recalculateProjectEndDate] End_date limpa (sem tarefas)')
       return { success: true }
     }
 
   } catch (err) {
-    console.error('❌ [recalculateProjectEndDate] Erro interno:', err)
     return { success: false, error: 'Erro interno ao recalcular data de fim' }
   }
 }
