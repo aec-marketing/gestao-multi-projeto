@@ -158,25 +158,11 @@ const [predecessors, setPredecessors] = useState<any[]>([])
 
     const result: TaskWithDates[] = []
 
-    // 🔍 DEBUG: Log de todas as tarefas recebidas
-    console.log('🔍 [calculateTaskDates] Total de tarefas recebidas:', tasks.length)
-    console.log('🔍 [calculateTaskDates] Estrutura de tarefas:', tasks.map(t => ({
-      id: t.id.substring(0, 8),
-      name: t.name,
-      parent_id: t.parent_id?.substring(0, 8) || 'null',
-      outline_level: t.outline_level,
-      wbs_code: t.wbs_code
-    })))
-
     // ========== NOVA ABORDAGEM: Processar TODAS as tarefas recursivamente ==========
     // Função recursiva para processar uma tarefa e TODAS as suas subtarefas (qualquer nível)
     function processTaskRecursively(task: Task, depth: number = 0): void {
-      const indent = '  '.repeat(depth)
-      console.log(`${indent}🔄 Processando: ${task.name} (level=${task.outline_level}, parent=${task.parent_id ? 'sim' : 'não'})`)
-
       // Pegar TODOS os filhos diretos desta tarefa
       const directChildren = tasks.filter(t => t.parent_id === task.id)
-      console.log(`${indent}   └─ Encontrados ${directChildren.length} filhos diretos`)
 
       // ═══════════════════════════════════════════════════════════════
       // MODO 1: Tarefa com datas definidas (MS Project ou manual)
@@ -199,7 +185,6 @@ const [predecessors, setPredecessors] = useState<any[]>([])
           end_date: taskEndDate,
           duration_days: taskDuration
         })
-        console.log(`${indent}   ✅ Adicionado ao result (total: ${result.length})`)
       }
       // ═══════════════════════════════════════════════════════════════
       // MODO 2: Tarefa SEM datas - calcular usando data do projeto
@@ -220,28 +205,18 @@ const [predecessors, setPredecessors] = useState<any[]>([])
           end_date: endDate,
           duration_days: taskDuration
         })
-        console.log(`${indent}   ✅ Adicionado ao result (total: ${result.length})`)
       }
     }
 
     // Iniciar processamento pelas tarefas raiz (sem parent_id)
     const rootTasks = tasks.filter(t => !t.parent_id)
-    console.log('🌳 [calculateTaskDates] Tarefas raiz encontradas:', rootTasks.length)
     rootTasks.forEach(rootTask => processTaskRecursively(rootTask, 0))
-
-    console.log('✅ [calculateTaskDates] Total de tarefas processadas:', result.length)
-    console.log('📊 [calculateTaskDates] Resultado final:', result.map(t => ({
-      name: t.name,
-      parent_id: tasks.find(orig => orig.id === t.id)?.parent_id?.substring(0, 8) || 'null'
-    })))
 
     return result
   }
 
   // Organizar tarefas em hierarquia (pais e filhos)
   function organizeTasksHierarchy(tasksWithDates: TaskWithDates[]): TaskWithAllocations[] {
-    console.log('🏗️ [organizeTasksHierarchy] Iniciando organização de', tasksWithDates.length, 'tarefas')
-
     const taskMap = new Map<string, TaskWithAllocations>()
     const rootTasks: TaskWithAllocations[] = []
 
@@ -265,8 +240,6 @@ const [predecessors, setPredecessors] = useState<any[]>([])
       taskMap.set(task.id, taskWithAllocs)
     })
 
-    console.log('📦 [organizeTasksHierarchy] Criadas', taskMap.size, 'tarefas no mapa')
-
     // Depois, organizar hierarquia
     taskMap.forEach(task => {
       if (task.parent_id) {
@@ -274,28 +247,10 @@ const [predecessors, setPredecessors] = useState<any[]>([])
         if (parent) {
           parent.subtasks = parent.subtasks || []
           parent.subtasks.push(task)
-          console.log(`   🔗 "${task.name}" → adicionado como filho de "${parent.name}"`)
-        } else {
-          console.warn(`   ⚠️ Parent não encontrado para "${task.name}" (parent_id: ${task.parent_id})`)
         }
       } else {
         rootTasks.push(task)
       }
-    })
-
-    console.log('🌳 [organizeTasksHierarchy] Total de tarefas raiz:', rootTasks.length)
-    console.log('📊 [organizeTasksHierarchy] Estrutura da hierarquia:')
-    rootTasks.forEach(root => {
-      console.log(`   └─ ${root.name} (${root.subtasks?.length || 0} filhos diretos)`)
-      root.subtasks?.forEach(child => {
-        console.log(`      └─ ${child.name} (${child.subtasks?.length || 0} filhos diretos)`)
-        child.subtasks?.forEach(grandchild => {
-          console.log(`         └─ ${grandchild.name} (${grandchild.subtasks?.length || 0} filhos diretos)`)
-          grandchild.subtasks?.forEach(greatgrandchild => {
-            console.log(`            └─ ${greatgrandchild.name}`)
-          })
-        })
-      })
     })
 
     return rootTasks
@@ -354,18 +309,7 @@ const [predecessors, setPredecessors] = useState<any[]>([])
   const allDescendants = getAllDescendants(filteredTaskIds)
   const finalFilteredTasks = [...filteredTasksWithDates, ...allDescendants]
 
-  console.log('🔍 [FILTROS] Tarefas principais filtradas:', filteredTasksWithDates.length)
-  console.log('🔍 [FILTROS] Descendentes encontrados (todos os níveis):', allDescendants.length)
-  console.log('🔍 [FILTROS] Total final:', finalFilteredTasks.length)
-
   const organizedTasks = organizeTasksHierarchy(finalFilteredTasks)
-
-  console.log('🎨 [RENDER] organizedTasks para renderização:', organizedTasks.length)
-  console.log('🎨 [RENDER] Estrutura final que será renderizada:', organizedTasks.map(t => ({
-    name: t.name,
-    subtasks_count: t.subtasks?.length || 0,
-    isExpanded: t.isExpanded
-  })))
 
   // Criar grid de datas (apenas para tarefas reais, sem buffer)
   const allDates = tasksWithDates.flatMap(t => [t.start_date, t.end_date])
@@ -1588,17 +1532,6 @@ useEffect(() => {
                   : (dateGrid.length * columnWidth) + 320 // Posição após todas as tarefas
                 const bufferWidthPx = bufferDays * columnWidth
 
-                // Debug log
-                console.log('🔍 Buffer Debug:', {
-                  lastTaskEndDate: lastTaskEndDate.toLocaleDateString('pt-BR'),
-                  bufferStartDate: bufferStartDate.toLocaleDateString('pt-BR'),
-                  bufferStartIndex,
-                  dateGridLength: dateGrid.length,
-                  dateGridWithBufferLength: dateGridWithBuffer.length,
-                  bufferStartPx,
-                  bufferWidthPx,
-                  columnWidth
-                })
 
                 // Determinar cor baseada no status
                 let bufferColor = 'bg-green-200'
