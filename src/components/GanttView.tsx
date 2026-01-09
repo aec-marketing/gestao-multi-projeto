@@ -41,6 +41,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
 
   useEffect(() => {
     loadProjectData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
   async function loadProjectData() {
@@ -817,7 +818,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
           <div className="text-right text-xs text-gray-500">
             <p>💡 Arraste tarefas para reordenar</p>
             <p>📊 Clique em ▶ para expandir subtarefas</p>
-            <p>➕ Use "+ Subtarefa" para decompor tarefas grandes</p>
+            <p>➕ Use &quot;+ Subtarefa&quot; para decompor tarefas grandes</p>
           </div>
         </div>
       </div>

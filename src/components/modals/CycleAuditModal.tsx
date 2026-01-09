@@ -28,6 +28,7 @@ export default function CycleAuditModal({
     if (isOpen) {
       scanForCycles()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
   async function scanForCycles() {

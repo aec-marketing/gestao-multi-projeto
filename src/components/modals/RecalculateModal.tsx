@@ -74,7 +74,7 @@ export default function RecalculateModal({
                   As seguintes tarefas têm predecessores que foram alterados.
                 </p>
                 <p className="text-xs text-yellow-700 mt-1">
-                  Clique em "Aplicar" para ajustar automaticamente as datas.
+                  Clique em &quot;Aplicar&quot; para ajustar automaticamente as datas.
                 </p>
               </div>
             </div>

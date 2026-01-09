@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Resource, ProjectInsert } from '@/types/database.types'
+import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
 
 interface NewProjectFormProps {
   onClose: () => void
@@ -198,9 +199,12 @@ export default function NewProjectForm({ onClose, onSuccess }: NewProjectFormPro
         if (tasksError) throw tasksError
       }
 
+      showSuccessAlert('Projeto criado com sucesso')
       onSuccess()
     } catch (error) {
+      logError(error, 'createProject')
       setErrors({ submit: 'Erro ao criar projeto. Tente novamente.' })
+      showErrorAlert(error, ErrorContext.PROJECT_CREATE)
     } finally {
       setIsLoading(false)
     }

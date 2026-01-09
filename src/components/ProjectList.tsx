@@ -6,13 +6,40 @@ import GanttView from '@/components/GanttView'
 import { formatDateBR } from '@/utils/date.utils'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
 
+/**
+ * Props for ProjectList component
+ */
 interface ProjectListProps {
+  /** Array of active projects to display */
   projects: Project[]
+  /** Array of resources for leader assignment */
   resources: Resource[]
+  /** Callback to refresh project list after changes */
   onRefresh?: () => void
 }
 
+/**
+ * ProjectList Component
+ *
+ * Displays a list of projects with detailed information and actions.
+ * Each project card shows:
+ * - Project name, code, category, and complexity
+ * - Leader and vendor information
+ * - Start and end dates
+ * - Buffer days if configured
+ * - Quick action buttons (Gantt view, edit, delete)
+ *
+ * Features:
+ * - Double confirmation for project deletion (name + keyword)
+ * - Gantt view modal for quick visualization
+ * - Link to dedicated project page
+ * - Automatic CASCADE deletion of related data
+ *
+ * @param props - Component props
+ * @returns Rendered project list or empty state message
+ */
 export default function ProjectList({ projects, resources, onRefresh }: ProjectListProps) {
   const [selectedProjectForGantt, setSelectedProjectForGantt] = useState<string | null>(null)
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
@@ -62,15 +89,15 @@ export default function ProjectList({ projects, resources, onRefresh }: ProjectL
 
       if (error) throw error
 
-      alert(`✅ Projeto "${projectName}" excluído com sucesso!`)
+      showSuccessAlert(`Projeto "${projectName}" excluído com sucesso!`)
 
       // Atualizar lista
       if (onRefresh) {
         onRefresh()
       }
     } catch (error) {
-      console.error('Erro ao excluir projeto:', error)
-      alert('❌ Erro ao excluir projeto: ' + (error as Error).message)
+      logError(error, 'deleteProject')
+      showErrorAlert(error, ErrorContext.PROJECT_DELETE)
     } finally {
       setDeletingProjectId(null)
     }

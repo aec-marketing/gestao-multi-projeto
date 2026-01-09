@@ -7,6 +7,7 @@ import { Allocation } from '@/types/allocation.types'
 import { supabase } from '@/lib/supabase'
 import { recalculateTasksInCascade, validateTaskStartDate } from '@/utils/predecessorCalculations'
 import RecalculateModal from '@/components/modals/RecalculateModal'
+import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
 
 interface TableViewTabProps {
   project: Project
@@ -70,7 +71,7 @@ const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
         .in('task_id', taskIds)
 
       if (error) {
-        console.error('Error loading predecessors:', error)
+        // Error loading predecessors - silent fail
       } else {
         setPredecessors(data || [])
       }
@@ -205,14 +206,11 @@ async function updateTask(taskId: string, field: string, value: string | number)
 
     if (error) throw error
 
-    console.log('💾 Atualização salva no banco:', updates)
-
     // Check if we need to recalculate dependent tasks (for date/duration changes)
     if (field === 'duration' || field === 'start_date' || field === 'end_date') {
       const cascadeUpdates = recalculateTasksInCascade(taskId, tasks, predecessors)
 
       if (cascadeUpdates.length > 0) {
-        console.log('🔄 Dependências detectadas, abrindo modal de recalculo:', cascadeUpdates)
         setPendingUpdates(cascadeUpdates)
         setShowRecalculateModal(true)
         return // Don't refresh yet, wait for modal
@@ -255,10 +253,11 @@ async function updateTask(taskId: string, field: string, value: string | number)
     // ========== FIM AJUSTE ==========
 
     // Atualizar lista
+    showSuccessAlert('Alterações salvas com sucesso')
     onRefresh()
   } catch (error) {
-    console.error('Erro ao salvar tarefa:', error)
-    alert('Erro ao salvar alterações')
+    logError(error, 'updateCell')
+    showErrorAlert(error, ErrorContext.TASK_UPDATE)
   }
 }
 async function createNewTask() {
@@ -288,10 +287,11 @@ async function createNewTask() {
     // Resetar form
     setNewTaskData({ name: '', type: 'projeto_mecanico', duration: 1 })
     setIsAddingTask(false)
+    showSuccessAlert('Tarefa criada com sucesso')
     onRefresh()
   } catch (error) {
-    console.error('Erro ao criar tarefa:', error)
-    alert('Erro ao criar tarefa')
+    logError(error, 'createNewTask')
+    showErrorAlert(error, ErrorContext.TASK_CREATE)
   }
 }
 
@@ -368,10 +368,11 @@ async function createNewSubtask(parentTaskId: string, parentType: string) {
     // Resetar form
     setNewSubtaskData({ name: '', duration: 1 })
     setAddingSubtaskToTask(null)
+    showSuccessAlert('Subtarefa criada com sucesso')
     onRefresh()
   } catch (error) {
-    console.error('Erro ao criar subtarefa:', error)
-    alert('Erro ao criar subtarefa')
+    logError(error, 'createNewSubtask')
+    showErrorAlert(error, ErrorContext.TASK_CREATE)
   }
 }
 
@@ -395,11 +396,12 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
       .eq('id', taskId)
 
     if (error) throw error
-    
+
+    showSuccessAlert('Tarefa excluída com sucesso')
     onRefresh()
   } catch (error) {
-    console.error('Erro ao excluir tarefa:', error)
-    alert('Erro ao excluir tarefa')
+    logError(error, 'deleteTask')
+    showErrorAlert(error, ErrorContext.TASK_DELETE)
   }
 }
 

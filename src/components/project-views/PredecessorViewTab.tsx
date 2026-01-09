@@ -6,6 +6,7 @@ import { Project, Task } from '@/types/database.types'
 import AddPredecessorModal from '@/components/modals/AddPredecessorModal'
 import EditPredecessorModal from '@/components/modals/EditPredecessorModal'
 import RecalculateModal from '@/components/modals/RecalculateModal'
+import { showErrorAlert, logError, ErrorContext } from '@/utils/errorHandler'
 
 // ============ TYPES ============
 interface Predecessor {
@@ -104,6 +105,7 @@ const [pendingUpdates, setPendingUpdates] = useState<any[]>([])
   // ============ LOAD PREDECESSORS ============
   useEffect(() => {
     loadPredecessors()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id])
 
   async function loadPredecessors() {
@@ -123,6 +125,8 @@ const [pendingUpdates, setPendingUpdates] = useState<any[]>([])
       
       setPredecessors(filtered as Predecessor[])
     } catch (error) {
+      logError(error, 'loadPredecessors')
+      showErrorAlert(error, ErrorContext.PREDECESSOR_LOAD)
       setPredecessors([])
     } finally {
       setLoading(false)

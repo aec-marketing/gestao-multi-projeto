@@ -12,14 +12,44 @@ import PredecessorViewTab from './project-views/PredecessorViewTab'
 import EditProjectButton from '@/components/modals/EditProjectButton'
 import { BufferStatusIndicator } from '@/components/gantt/BufferBar'
 import { recalculateProjectEndDate } from '@/lib/project-service'
+import { ComponentErrorBoundary } from '@/components/error-boundary'
+import { showErrorAlert, logError, ErrorContext } from '@/utils/errorHandler'
 
+/**
+ * Props for ProjectGanttPage component
+ */
 interface ProjectGanttPageProps {
+  /** ID of the project to display */
   projectId: string
+  /** Optional task ID to highlight in the view */
   highlightTaskId?: string
 }
 
+/**
+ * Available view modes for the project page
+ */
 type ViewMode = 'gantt' | 'table' | 'timeline' | 'financial' | 'predecessors'
 
+/**
+ * ProjectGanttPage Component
+ *
+ * Main project management page with multiple views:
+ * - Gantt: Visual timeline with drag-and-drop, dependencies, and buffer tracking
+ * - Table: Spreadsheet-style task management with inline editing
+ * - Timeline: Simplified calendar view of project schedule
+ * - Financial: Budget tracking and cost analysis
+ * - Predecessors: Dependency management and critical path visualization
+ *
+ * Features:
+ * - Error boundaries for each view to prevent crashes
+ * - Real-time project end date recalculation
+ * - Buffer status indicator for schedule health
+ * - Quick access to edit project details
+ * - Link back to dashboard
+ *
+ * @param props - Component props
+ * @returns Full-featured project management interface
+ */
 export default function ProjectGanttPage({ projectId, highlightTaskId }: ProjectGanttPageProps) {
   const [project, setProject] = useState<Project | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
@@ -31,6 +61,7 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
   // Carregar dados
   useEffect(() => {
     loadProjectData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
   async function loadProjectData() {
@@ -73,7 +104,8 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
       setResources(resourcesData || [])
       setAllocations(allocationsData || [])
     } catch (error) {
-      // Erro ao carregar dados
+      logError(error, 'loadProjectData')
+      showErrorAlert(error, ErrorContext.PROJECT_LOAD)
     } finally {
       setLoading(false)
     }
@@ -206,50 +238,60 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
       {/* Content Area */}
       <main className="p-6">
         {viewMode === 'gantt' && (
-          <GanttViewTab
-            project={project}
-            tasks={tasks}
-            resources={resources}
-            allocations={allocations}
-            onRefresh={loadProjectData}
-            highlightTaskId={highlightTaskId}
-          />
+          <ComponentErrorBoundary componentName="Gantt View" onReset={loadProjectData}>
+            <GanttViewTab
+              project={project}
+              tasks={tasks}
+              resources={resources}
+              allocations={allocations}
+              onRefresh={loadProjectData}
+              highlightTaskId={highlightTaskId}
+            />
+          </ComponentErrorBoundary>
         )}
 {viewMode === 'predecessors' && (
-  <PredecessorViewTab
-    project={project}
-    tasks={tasks}
-    onRefresh={onRefresh}
-  />
+  <ComponentErrorBoundary componentName="Predecessors View" onReset={onRefresh}>
+    <PredecessorViewTab
+      project={project}
+      tasks={tasks}
+      onRefresh={onRefresh}
+    />
+  </ComponentErrorBoundary>
 )}
         {viewMode === 'table' && (
-          <TableViewTab
-            project={project}
-            tasks={tasks}
-            resources={resources}
-            allocations={allocations}
-            onRefresh={loadProjectData}
-          />
+          <ComponentErrorBoundary componentName="Table View" onReset={loadProjectData}>
+            <TableViewTab
+              project={project}
+              tasks={tasks}
+              resources={resources}
+              allocations={allocations}
+              onRefresh={loadProjectData}
+            />
+          </ComponentErrorBoundary>
         )}
 
         {viewMode === 'timeline' && (
-  <TimelineViewTab
-    project={project}
-    tasks={tasks}
-    resources={resources}
-    allocations={allocations}
-    onRefresh={loadProjectData}
-  />
+  <ComponentErrorBoundary componentName="Timeline View" onReset={loadProjectData}>
+    <TimelineViewTab
+      project={project}
+      tasks={tasks}
+      resources={resources}
+      allocations={allocations}
+      onRefresh={loadProjectData}
+    />
+  </ComponentErrorBoundary>
 )}
 
         {viewMode === 'financial' && (
-  <FinancialViewTab
-    project={project}
-    tasks={tasks}
-    resources={resources}
-    allocations={allocations}
-    onRefresh={loadProjectData}
-  />
+  <ComponentErrorBoundary componentName="Financial View" onReset={loadProjectData}>
+    <FinancialViewTab
+      project={project}
+      tasks={tasks}
+      resources={resources}
+      allocations={allocations}
+      onRefresh={loadProjectData}
+    />
+  </ComponentErrorBoundary>
 )}
       </main>
     </div>

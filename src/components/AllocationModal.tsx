@@ -1,10 +1,14 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Resource, Task } from '@/types/database.types'
 import { Allocation, PRIORITY_CONFIG } from '@/types/allocation.types'
 import { formatDateBR } from '@/utils/date.utils'
+import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
+import { useActiveResources, useAllocations } from '@/hooks/useResources'
+import { useResourceContext } from '@/contexts/ResourceContext'
+import { checkResourceAvailability, ResourceConflict } from '@/lib/resource-service'
 
 interface AllocationModalProps {
   task: Task
@@ -13,48 +17,29 @@ interface AllocationModalProps {
   onSuccess: () => void
 }
 
-export default function AllocationModal({ 
-  task, 
-  projectLeaderId, 
-  onClose, 
-  onSuccess 
+export default function AllocationModal({
+  task,
+  projectLeaderId,
+  onClose,
+  onSuccess
 }: AllocationModalProps) {
-  const [allResources, setAllResources] = useState<Resource[]>([])
+  // ✅ Use global resources from context
+  const { resources: allResources, isLoading: resourcesLoading } = useActiveResources()
+  const { allocations: allAllocations } = useAllocations()
+  const { refreshAllocations } = useResourceContext()
+
   const [selectedResourceId, setSelectedResourceId] = useState<string>('')
   const [selectedRole, setSelectedRole] = useState<'lider' | 'operador'>('lider')
   const [priority, setPriority] = useState<'alta' | 'media' | 'baixa'>('media')
-  const [existingAllocations, setExistingAllocations] = useState<Allocation[]>([])
-  const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [conflicts, setConflicts] = useState<ResourceConflict[]>([])
+  const [showConflictWarning, setShowConflictWarning] = useState(false)
+  const [allowOverride, setAllowOverride] = useState(false)
+  const [conflictingPriorities, setConflictingPriorities] = useState<string[]>([])
 
-  useEffect(() => {
-    loadData()
-  }, [task.id])
-
-  async function loadData() {
-    setIsLoading(true)
-    try {
-      // Carregar TODOS os recursos ativos
-      const { data: resourcesData } = await supabase
-        .from('resources')
-        .select('*')
-        .eq('is_active', true)
-        .order('role', { ascending: false }) // gerente > lider > operador
-        .order('name', { ascending: true })
-
-      // Carregar alocações existentes da tarefa
-      const { data: allocationsData } = await supabase
-        .from('allocations')
-        .select('*')
-        .eq('task_id', task.id)
-
-      setAllResources(resourcesData || [])
-      setExistingAllocations(allocationsData || [])
-    } catch (error) {
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  // Filter allocations for this specific task
+  const existingAllocations = allAllocations.filter(a => a.task_id === task.id)
+  const isLoading = resourcesLoading
 
   async function handleAllocate() {
     if (!selectedResourceId) {
@@ -62,7 +47,86 @@ export default function AllocationModal({
       return
     }
 
+    // Check for task dates
+    if (!task.start_date || !task.end_date) {
+      alert('Esta tarefa não possui datas definidas')
+      return
+    }
+
     setIsSaving(true)
+    setConflicts([])
+    setShowConflictWarning(false)
+
+    try {
+      // ✅ Check for conflicts before allocating
+      const availabilityCheck = await checkResourceAvailability(
+        selectedResourceId,
+        task.start_date,
+        task.end_date
+      )
+
+      if (!availabilityCheck.isAvailable) {
+        // Extract priorities from conflicting allocations
+        const allocationConflicts = availabilityCheck.conflicts.filter(c => c.type === 'allocation_overlap')
+        const priorities = allocationConflicts
+          .map(c => {
+            const conflictAlloc = allAllocations.find(a => a.id === (c.details as any)?.allocationId)
+            return conflictAlloc?.priority
+          })
+          .filter(Boolean) as string[]
+
+        setConflicts(availabilityCheck.conflicts)
+        setConflictingPriorities(priorities)
+        setShowConflictWarning(true)
+        setIsSaving(false)
+
+        // Check if override is allowed (only for allocation overlaps, not personal events)
+        const hasPersonalEventBlock = availabilityCheck.conflicts.some(c => c.type === 'personal_event_block')
+        setAllowOverride(!hasPersonalEventBlock && allocationConflicts.length > 0)
+
+        return
+      }
+
+      // Create allocation
+      const { error } = await supabase
+        .from('allocations')
+        .insert({
+          resource_id: selectedResourceId,
+          task_id: task.id,
+          priority: priority,
+          start_date: task.start_date,
+          end_date: task.end_date
+        })
+
+      if (error) throw error
+
+      showSuccessAlert('Recurso alocado com sucesso!')
+
+      // Reset form
+      setSelectedResourceId('')
+      setPriority('media')
+      setConflicts([])
+      setShowConflictWarning(false)
+
+      // Refresh global allocations
+      await refreshAllocations()
+      onSuccess()
+    } catch (error: any) {
+      if (error.code === '23505') {
+        alert('Esta pessoa já está alocada nesta tarefa')
+      } else {
+        logError(error, 'handleAllocate')
+        showErrorAlert(error, ErrorContext.ALLOCATION_CREATE)
+      }
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function handleForceAllocate() {
+    // Force allocation even with conflicts (only for allocation overlaps)
+    setIsSaving(true)
+
     try {
       const { error } = await supabase
         .from('allocations')
@@ -76,18 +140,25 @@ export default function AllocationModal({
 
       if (error) throw error
 
-      // Resetar formulário
+      showSuccessAlert('Recurso alocado com prioridade diferenciada!')
+
+      // Reset form
       setSelectedResourceId('')
       setPriority('media')
-      
-      // Recarregar dados
-      loadData()
+      setConflicts([])
+      setConflictingPriorities([])
+      setShowConflictWarning(false)
+      setAllowOverride(false)
+
+      // Refresh global allocations
+      await refreshAllocations()
       onSuccess()
     } catch (error: any) {
       if (error.code === '23505') {
         alert('Esta pessoa já está alocada nesta tarefa')
       } else {
-        alert('Erro ao alocar recurso')
+        logError(error, 'handleForceAllocate')
+        showErrorAlert(error, ErrorContext.ALLOCATION_CREATE)
       }
     } finally {
       setIsSaving(false)
@@ -105,24 +176,49 @@ export default function AllocationModal({
 
       if (error) throw error
 
-      loadData()
+      showSuccessAlert('Alocação removida com sucesso')
+
+      // Refresh global allocations
+      await refreshAllocations()
       onSuccess()
     } catch (error) {
-      alert('Erro ao remover alocação')
+      logError(error, 'removeAllocation')
+      showErrorAlert(error, ErrorContext.ALLOCATION_DELETE)
     }
   }
 
   // Separar recursos por papel
   const allocatedResourceIds = existingAllocations.map(a => a.resource_id)
-  
-  // Líderes alocados na tarefa
+
+  // Líderes alocados na tarefa atual
   const allocatedLeaders = existingAllocations
     .map(a => allResources.find(r => r.id === a.resource_id))
     .filter(r => r && (r.role === 'lider' || r.role === 'gerente'))
     .filter(Boolean) as Resource[]
-  
-  // IDs dos líderes alocados
-  const allocatedLeaderIds = allocatedLeaders.map(l => l.id)
+
+  // ✅ HERANÇA DE LÍDERES: Se esta é uma subtarefa, buscar líderes da tarefa pai
+  const parentTaskLeaders = useMemo(() => {
+    if (!task.parent_id) return []
+
+    // Buscar alocações da tarefa pai
+    const parentAllocations = allAllocations.filter(a => a.task_id === task.parent_id)
+
+    // Extrair líderes alocados na tarefa pai
+    return parentAllocations
+      .map(a => allResources.find(r => r.id === a.resource_id))
+      .filter(r => r && (r.role === 'lider' || r.role === 'gerente'))
+      .filter(Boolean) as Resource[]
+  }, [task.parent_id, allAllocations, allResources])
+
+  // Combinar líderes da tarefa atual + líderes herdados da tarefa pai (sem duplicatas)
+  const allEffectiveLeaders = useMemo(() => {
+    const combined = [...allocatedLeaders, ...parentTaskLeaders]
+    const uniqueLeaderIds = new Set(combined.map(l => l.id))
+    return Array.from(uniqueLeaderIds).map(id => combined.find(l => l.id === id)!).filter(Boolean)
+  }, [allocatedLeaders, parentTaskLeaders])
+
+  // IDs dos líderes efetivos (incluindo herdados)
+  const allocatedLeaderIds = allEffectiveLeaders.map(l => l.id)
 
   // Líderes disponíveis (não alocados ainda)
   const availableLeaders = allResources.filter(r => 
@@ -138,10 +234,11 @@ export default function AllocationModal({
     !allocatedResourceIds.includes(r.id)
   )
 
-  // Agrupar operadores por líder
-  const operatorsByLeader = allocatedLeaders.map(leader => ({
+  // Agrupar operadores por líder (usar líderes efetivos, incluindo herdados)
+  const operatorsByLeader = allEffectiveLeaders.map(leader => ({
     leader,
-    operators: operatorsOfAllocatedLeaders.filter(op => op.leader_id === leader.id)
+    operators: operatorsOfAllocatedLeaders.filter(op => op.leader_id === leader.id),
+    isInherited: parentTaskLeaders.some(pl => pl.id === leader.id) && !allocatedLeaders.some(al => al.id === leader.id)
   }))
 
   // Todas as alocações com detalhes dos recursos
@@ -228,6 +325,14 @@ export default function AllocationModal({
                 Nova Alocação
               </h4>
 
+              {/* Info sobre líderes herdados */}
+              {parentTaskLeaders.length > 0 && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                  ℹ️ Esta subtarefa herda {parentTaskLeaders.length} {parentTaskLeaders.length === 1 ? 'líder' : 'líderes'} da tarefa pai.
+                  Você pode alocar operadores desses líderes sem precisar alocá-los novamente.
+                </div>
+              )}
+
               {/* Seleção de Tipo (Líder ou Operador) */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -255,18 +360,18 @@ export default function AllocationModal({
                       setSelectedRole('operador')
                       setSelectedResourceId('')
                     }}
-                    disabled={allocatedLeaders.length === 0}
+                    disabled={allEffectiveLeaders.length === 0}
                     className={`p-3 rounded-lg border-2 transition-all ${
                       selectedRole === 'operador'
                         ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : allocatedLeaders.length === 0
+                        : allEffectiveLeaders.length === 0
                         ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
                         : 'border-gray-200 hover:border-gray-300 text-gray-700'
                     }`}
                   >
                     <div className="font-medium">👷 Operador</div>
                     <div className="text-xs mt-1 opacity-80">
-                      {allocatedLeaders.length === 0 
+                      {allEffectiveLeaders.length === 0
                         ? 'Aloque um líder primeiro'
                         : 'Alocar operador de um líder'
                       }
@@ -316,11 +421,16 @@ export default function AllocationModal({
                   ) : (
                     <div className="space-y-4">
                       {/* Mostrar operadores agrupados por líder */}
-                      {operatorsByLeader.map(({ leader, operators }) => (
+                      {operatorsByLeader.map(({ leader, operators, isInherited }) => (
                         operators.length > 0 && (
-                          <div key={leader.id} className="border rounded-lg p-3 bg-gray-50">
-                            <div className="text-sm font-medium text-gray-700 mb-2">
-                              👨‍💼 Equipe de {leader.name}
+                          <div key={leader.id} className={`border rounded-lg p-3 ${isInherited ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'}`}>
+                            <div className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                              <span>👨‍💼 Equipe de {leader.name}</span>
+                              {isInherited && (
+                                <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full" title="Líder alocado na tarefa pai">
+                                  Herdado da tarefa pai
+                                </span>
+                              )}
                             </div>
                             <div className="space-y-2">
                               {operators.map(operator => (
@@ -391,6 +501,125 @@ export default function AllocationModal({
                   <div className="mt-1">
                     <strong>Início:</strong> {formatDateBR(task.start_date)} •
                     <strong> Fim:</strong> {formatDateBR(task.end_date)}
+                  </div>
+                </div>
+              )}
+
+              {/* ✅ Conflict Warning */}
+              {showConflictWarning && conflicts.length > 0 && (
+                <div className="mt-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
+                  <div className="flex items-start gap-2 mb-2">
+                    <span className="text-red-600 text-xl">⚠️</span>
+                    <div className="flex-1">
+                      <h5 className="font-bold text-red-900 mb-1">
+                        {allowOverride ? 'Conflito Detectado - Priorização Necessária' : 'Conflito Detectado - Não foi possível alocar'}
+                      </h5>
+                      <p className="text-sm text-red-800 mb-3">
+                        {allowOverride
+                          ? 'Este recurso já está alocado em outra(s) tarefa(s) no mesmo período:'
+                          : 'Este recurso não está disponível no período da tarefa:'
+                        }
+                      </p>
+                      <div className="space-y-2">
+                        {conflicts.map((conflict, idx) => (
+                          <div key={idx} className="bg-white p-2 rounded border border-red-200 text-sm text-red-900">
+                            <div className="font-medium">
+                              {conflict.type === 'allocation_overlap' && '📊 Já alocado em outra tarefa'}
+                              {conflict.type === 'personal_event_block' && '🚫 Evento pessoal bloqueante'}
+                            </div>
+                            <div className="text-red-700 mt-1">{conflict.message}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Override Option */}
+                      {allowOverride && (
+                        <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded-lg">
+                          <div className="text-sm text-yellow-900 font-medium mb-2">
+                            💡 Você pode alocar com prioridade diferente
+                          </div>
+                          <p className="text-xs text-yellow-800 mb-3">
+                            As tarefas conflitantes têm prioridade: {conflictingPriorities.map(p => PRIORITY_CONFIG[p as 'alta' | 'media' | 'baixa']?.label || p).join(', ')}.
+                            Escolha uma prioridade diferente para criar hierarquia entre as tarefas.
+                          </p>
+
+                          {/* Priority Selection for Override */}
+                          <div className="space-y-2">
+                            <label className="text-xs font-semibold text-yellow-900">
+                              Selecione a prioridade desta alocação:
+                            </label>
+                            <div className="grid grid-cols-3 gap-2">
+                              {(['alta', 'media', 'baixa'] as const).map(p => {
+                                const isConflicting = conflictingPriorities.includes(p)
+                                const isDisabled = isConflicting
+
+                                return (
+                                  <button
+                                    key={p}
+                                    onClick={() => !isDisabled && setPriority(p)}
+                                    disabled={isDisabled}
+                                    className={`p-2 rounded-lg border-2 text-xs transition-all ${
+                                      isDisabled
+                                        ? 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
+                                        : priority === p
+                                        ? `${PRIORITY_CONFIG[p].color} border-current`
+                                        : 'border-gray-300 hover:border-gray-400 text-gray-700 bg-white'
+                                    }`}
+                                  >
+                                    <div className="font-medium">
+                                      {PRIORITY_CONFIG[p].label}
+                                    </div>
+                                    {isConflicting && (
+                                      <div className="text-xs mt-0.5 text-red-600">
+                                        ✗ Já em uso
+                                      </div>
+                                    )}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Override Action Buttons */}
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={handleForceAllocate}
+                              disabled={conflictingPriorities.includes(priority) || isSaving}
+                              className="flex-1 px-3 py-2 bg-yellow-600 text-white text-sm rounded font-medium hover:bg-yellow-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {isSaving ? 'Alocando...' : '✓ Alocar com Prioridade Diferente'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setShowConflictWarning(false)
+                                setConflicts([])
+                                setConflictingPriorities([])
+                                setAllowOverride(false)
+                                setSelectedResourceId('')
+                              }}
+                              className="px-3 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 transition-colors"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Cancel button for non-overridable conflicts */}
+                      {!allowOverride && (
+                        <button
+                          onClick={() => {
+                            setShowConflictWarning(false)
+                            setConflicts([])
+                            setConflictingPriorities([])
+                            setSelectedResourceId('')
+                          }}
+                          className="mt-3 px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+                        >
+                          Escolher outro recurso
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

@@ -48,12 +48,14 @@ export default function ResourceCalendar({ onClose }: ResourceCalendarProps) {
 
   useEffect(() => {
     loadData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     if (allocations.length > 0) {
       generateCalendarEvents()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allocations, selectedResource])
 
   async function loadData() {

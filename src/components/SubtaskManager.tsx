@@ -196,7 +196,7 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
           </div>
 
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-            ℹ️ A subtarefa será criada como parte de "{parentTask.name}"
+            ℹ️ A subtarefa será criada como parte de &quot;{parentTask.name}&quot;
             <div className="mt-2 text-xs">
               💡 <strong>Líderes/Gerentes alocados na tarefa pai serão automaticamente copiados para esta subtarefa.</strong> Você poderá adicionar operadores depois.
             </div>

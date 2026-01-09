@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { ErrorBoundary } from '@/components/error-boundary'
+import { ResourceProvider } from '@/contexts/ResourceContext'
 
 export const metadata: Metadata = {
   title: 'Sistema de Gestão Multi-Projeto',
@@ -14,7 +16,11 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className="antialiased">
-        {children}
+        <ErrorBoundary>
+          <ResourceProvider>
+            {children}
+          </ResourceProvider>
+        </ErrorBoundary>
       </body>
     </html>
   )

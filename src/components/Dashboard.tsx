@@ -3,51 +3,65 @@
 import { supabase } from '@/lib/supabase'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Project, Resource } from '@/types/database.types'
+import { Project } from '@/types/database.types'
 import StatsCard from '@/components/StatsCard'
 import ProjectList from '@/components/ProjectList'
 import NewProjectForm from '@/components/NewProjectForm'
 import ResourceManager from '@/components/ResourceManager'
+import { useActiveResources } from '@/hooks/useResources'
+import { useResourceContext } from '@/contexts/ResourceContext'
 
+/**
+ * Dashboard Component
+ *
+ * Main dashboard view that displays:
+ * - Project statistics (total projects, active tasks, resources, completion rate)
+ * - List of all active projects with quick actions
+ * - Quick access to create new projects
+ * - Resource management modal
+ * - Navigation to calendar and import tools
+ *
+ * @returns Dashboard UI with project overview and management tools
+ */
 export default function Dashboard() {
+  // ✅ Usa hooks para recursos (dados globais do contexto)
+  const { resources, isLoading: resourcesLoading } = useActiveResources()
+  const { refreshAll } = useResourceContext()
+
+  // Projects ainda carregam localmente
   const [projects, setProjects] = useState<Project[]>([])
-  const [resources, setResources] = useState<Resource[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [projectsLoading, setProjectsLoading] = useState(true)
   const [showNewProjectForm, setShowNewProjectForm] = useState(false)
   const [showResourceManager, setShowResourceManager] = useState(false)
 
   useEffect(() => {
-    loadDashboardData()
+    loadProjects()
   }, [])
 
-  async function loadDashboardData() {
+  async function loadProjects() {
     try {
-      // Carregar projetos
       const { data: projectsData } = await supabase
         .from('projects')
         .select('*')
         .eq('is_active', true)
         .order('created_at', { ascending: false })
 
-      // Carregar recursos
-      const { data: resourcesData } = await supabase
-        .from('resources')
-        .select('*')
-        .eq('is_active', true)
-        .order('role', { ascending: true })
-
       setProjects(projectsData || [])
-      setResources(resourcesData || [])
     } catch (error) {
+      // Error silently handled
     } finally {
-      setIsLoading(false)
+      setProjectsLoading(false)
     }
   }
 
   function handleNewProjectSuccess() {
     setShowNewProjectForm(false)
-    loadDashboardData() // Recarregar dados
+    loadProjects() // Recarregar projetos
+    refreshAll() // Recarregar recursos globalmente
   }
+
+  // Loading state: aguarda tanto projetos quanto recursos
+  const isLoading = projectsLoading || resourcesLoading
 
   // Calcular estatísticas
   const stats = {
@@ -251,7 +265,7 @@ export default function Dashboard() {
           <ProjectList
             projects={projects}
             resources={resources}
-            onRefresh={loadDashboardData}
+            onRefresh={loadProjects}
           />
         </div>
 
