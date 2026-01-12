@@ -11,6 +11,7 @@ import PredecessorLines from '@/components/gantt/PredecessorLines'
 import { recalculateTasksInCascade, validateTaskStartDate, auditPredecessorConflicts } from '@/utils/predecessorCalculations'
 import RecalculateModal from '@/components/modals/RecalculateModal'
 import CycleAuditModal from '@/components/modals/CycleAuditModal'
+import { useRouter } from 'next/navigation'
 import { detectCycles } from '@/lib/msproject/validation'
 import { calculateProjectBuffer } from '@/lib/buffer-utils'
 
@@ -101,6 +102,7 @@ export default function GanttViewTab({
   onRefresh,
   highlightTaskId
 }: GanttViewTabProps) {
+  const router = useRouter()
   const [selectedTask, setSelectedTask] = useState<string | null>(null)
   const [draggedTask, setDraggedTask] = useState<string | null>(null)
   const [dragOverTask, setDragOverTask] = useState<string | null>(null)
@@ -150,6 +152,9 @@ const [predecessors, setPredecessors] = useState<any[]>([])
   const [tasksInCycle, setTasksInCycle] = useState<Set<string>>(new Set())
   // ========== FIM NOVO ==========
 
+  // ========== NOVO: Estado para Modal de Apresentação ==========
+  // ========== FIM NOVO ==========
+
   function calculateTaskDates(): TaskWithDates[] {
     if (!project?.start_date) return []
 
@@ -157,12 +162,16 @@ const [predecessors, setPredecessors] = useState<any[]>([])
     if (!projectStart) return []
 
     const result: TaskWithDates[] = []
+    const processedTaskDates = new Map<string, { start: Date, end: Date }>()
 
     // ========== NOVA ABORDAGEM: Processar TODAS as tarefas recursivamente ==========
     // Função recursiva para processar uma tarefa e TODAS as suas subtarefas (qualquer nível)
     function processTaskRecursively(task: Task, depth: number = 0): void {
       // Pegar TODOS os filhos diretos desta tarefa
       const directChildren = tasks.filter(t => t.parent_id === task.id)
+
+      // RECURSÃO PRIMEIRO: Processar TODOS os filhos antes de processar o pai
+      directChildren.forEach(child => processTaskRecursively(child, depth + 1))
 
       // ═══════════════════════════════════════════════════════════════
       // MODO 1: Tarefa com datas definidas (MS Project ou manual)
@@ -172,11 +181,35 @@ const [predecessors, setPredecessors] = useState<any[]>([])
         let taskEndDate = parseLocalDate(task.end_date)
         if (!taskStartDate || !taskEndDate) return
 
-        // RECURSÃO: Processar TODOS os filhos primeiro (em qualquer nível)
-        directChildren.forEach(child => processTaskRecursively(child, depth + 1))
+        // Se tem subtarefas, recalcular datas baseado nas subtarefas
+        if (directChildren.length > 0) {
+          const childrenWithDates = directChildren
+            .map(child => processedTaskDates.get(child.id))
+            .filter((dates): dates is { start: Date, end: Date } => dates !== undefined)
+
+          if (childrenWithDates.length > 0) {
+            const earliestChildStart = new Date(Math.min(...childrenWithDates.map(d => d.start.getTime())))
+            const latestChildEnd = new Date(Math.max(...childrenWithDates.map(d => d.end.getTime())))
+
+            // Aplicar margens
+            if (task.margin_start && task.margin_start > 0) {
+              earliestChildStart.setDate(earliestChildStart.getDate() - Math.ceil(task.margin_start))
+            }
+            if (task.margin_end && task.margin_end > 0) {
+              latestChildEnd.setDate(latestChildEnd.getDate() + Math.ceil(task.margin_end))
+            }
+
+            // Usar as datas calculadas das subtarefas
+            taskStartDate = earliestChildStart
+            taskEndDate = latestChildEnd
+          }
+        }
 
         // Calcular duração REAL baseada nas datas
         const taskDuration = Math.max(1, Math.ceil((taskEndDate.getTime() - taskStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+
+        // Guardar datas processadas para uso pelos pais
+        processedTaskDates.set(task.id, { start: taskStartDate, end: taskEndDate })
 
         // Adicionar esta tarefa ao resultado
         result.push({
@@ -187,16 +220,49 @@ const [predecessors, setPredecessors] = useState<any[]>([])
         })
       }
       // ═══════════════════════════════════════════════════════════════
-      // MODO 2: Tarefa SEM datas - calcular usando data do projeto
+      // MODO 2: Tarefa SEM datas - calcular usando data do projeto ou subtarefas
       // ═══════════════════════════════════════════════════════════════
       else {
-        const startDate = new Date(projectStart)
-        const taskDuration = Math.ceil(task.duration)
-        const endDate = new Date(startDate)
-        endDate.setDate(endDate.getDate() + taskDuration - 1)
+        let startDate: Date
+        let endDate: Date
+        let taskDuration: number
 
-        // RECURSÃO: Processar TODOS os filhos (em qualquer nível)
-        directChildren.forEach(child => processTaskRecursively(child, depth + 1))
+        // Se tem subtarefas, usar o range delas
+        if (directChildren.length > 0) {
+          const childrenWithDates = directChildren
+            .map(child => processedTaskDates.get(child.id))
+            .filter((dates): dates is { start: Date, end: Date } => dates !== undefined)
+
+          if (childrenWithDates.length > 0) {
+            startDate = new Date(Math.min(...childrenWithDates.map(d => d.start.getTime())))
+            endDate = new Date(Math.max(...childrenWithDates.map(d => d.end.getTime())))
+
+            // Aplicar margens
+            if (task.margin_start && task.margin_start > 0) {
+              startDate.setDate(startDate.getDate() - Math.ceil(task.margin_start))
+            }
+            if (task.margin_end && task.margin_end > 0) {
+              endDate.setDate(endDate.getDate() + Math.ceil(task.margin_end))
+            }
+
+            taskDuration = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+          } else {
+            // Sem subtarefas com datas, usar data do projeto
+            startDate = new Date(projectStart)
+            taskDuration = Math.ceil(task.duration)
+            endDate = new Date(startDate)
+            endDate.setDate(endDate.getDate() + taskDuration - 1)
+          }
+        } else {
+          // Sem subtarefas, usar data do projeto
+          startDate = new Date(projectStart)
+          taskDuration = Math.ceil(task.duration)
+          endDate = new Date(startDate)
+          endDate.setDate(endDate.getDate() + taskDuration - 1)
+        }
+
+        // Guardar datas processadas para uso pelos pais
+        processedTaskDates.set(task.id, { start: startDate, end: endDate })
 
         // Adicionar esta tarefa ao resultado
         result.push({
@@ -525,6 +591,160 @@ async function handleReorderTasks(draggedId: string, targetId: string) {
   }
 }
 
+// ========== FUNÇÃO PARA SINCRONIZAR TODAS AS DATAS DE PAIS ==========
+async function syncAllParentDates() {
+  if (!project?.id) return
+
+  console.log('[Sync] Iniciando sincronização de todas as datas de pais...')
+
+  // Buscar dados atualizados do banco
+  const { data: currentTasks, error: fetchError } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('project_id', project.id)
+
+  if (fetchError || !currentTasks) {
+    console.error('[Sync] Erro ao buscar tarefas:', fetchError)
+    alert('Erro ao buscar tarefas do projeto')
+    return
+  }
+
+  // Encontrar todas as tarefas pai (que têm filhos)
+  const parentTasks = currentTasks.filter(task =>
+    currentTasks.some(t => t.parent_id === task.id)
+  )
+
+  console.log(`[Sync] Encontradas ${parentTasks.length} tarefas pai para sincronizar`)
+
+  let updatedCount = 0
+
+  // Recalcular cada pai
+  for (const parent of parentTasks) {
+    const subtasks = currentTasks.filter(t => t.parent_id === parent.id && t.start_date && t.end_date)
+
+    if (subtasks.length === 0) continue
+
+    // Calcular range real das subtarefas
+    const startDates = subtasks.map(st => new Date(st.start_date!))
+    const endDates = subtasks.map(st => new Date(st.end_date!))
+
+    const earliestStart = new Date(Math.min(...startDates.map(d => d.getTime())))
+    const latestEnd = new Date(Math.max(...endDates.map(d => d.getTime())))
+
+    // Aplicar margens se existirem
+    if (parent.margin_start && parent.margin_start > 0) {
+      earliestStart.setDate(earliestStart.getDate() - Math.ceil(parent.margin_start))
+    }
+    if (parent.margin_end && parent.margin_end > 0) {
+      latestEnd.setDate(latestEnd.getDate() + Math.ceil(parent.margin_end))
+    }
+
+    const newDuration = Math.max(1, Math.ceil((latestEnd.getTime() - earliestStart.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+
+    const formattedStart = earliestStart.toISOString().split('T')[0]
+    const formattedEnd = latestEnd.toISOString().split('T')[0]
+
+    // Atualizar apenas se houver mudança
+    if (parent.start_date !== formattedStart || parent.end_date !== formattedEnd || parent.duration !== newDuration) {
+      console.log(`[Sync] Atualizando "${parent.name}":`, {
+        antes: `${parent.start_date} - ${parent.end_date}`,
+        depois: `${formattedStart} - ${formattedEnd}`
+      })
+
+      const { error } = await supabase
+        .from('tasks')
+        .update({
+          start_date: formattedStart,
+          end_date: formattedEnd,
+          duration: newDuration
+        })
+        .eq('id', parent.id)
+
+      if (error) {
+        console.error(`[Sync] Erro ao atualizar "${parent.name}":`, error)
+      } else {
+        updatedCount++
+      }
+    }
+  }
+
+  console.log(`[Sync] Sincronização concluída: ${updatedCount} tarefas atualizadas`)
+
+  // Atualizar a visualização
+  onRefresh()
+
+  alert(`Sincronização concluída!\n\n${updatedCount} tarefa(s) pai foram atualizadas com as datas corretas baseadas em suas subtarefas.`)
+}
+
+// ========== FUNÇÃO AUXILIAR: Recalcular datas de tarefa pai baseado em subtarefas ==========
+async function recalculateParentDatesFromSubtasks(parentId: string) {
+  // Buscar dados atualizados do banco para garantir precisão
+  const { data: currentTasks, error: fetchError } = await supabase
+    .from('tasks')
+    .select('*')
+    .eq('project_id', project.id)
+
+  if (fetchError) {
+    console.error('Erro ao buscar tarefas:', fetchError)
+    return
+  }
+
+  const parent = currentTasks?.find(t => t.id === parentId)
+  if (!parent) return
+
+  const subtasks = currentTasks?.filter(t => t.parent_id === parentId) || []
+  if (subtasks.length === 0) return
+
+  // Filtrar apenas subtarefas com datas válidas
+  const subtasksWithDates = subtasks.filter(st => st.start_date && st.end_date)
+  if (subtasksWithDates.length === 0) return
+
+  // Encontrar a data de início mais cedo e a data de fim mais tarde
+  const startDates = subtasksWithDates.map(st => new Date(st.start_date!))
+  const endDates = subtasksWithDates.map(st => new Date(st.end_date!))
+
+  const earliestStart = new Date(Math.min(...startDates.map(d => d.getTime())))
+  const latestEnd = new Date(Math.max(...endDates.map(d => d.getTime())))
+
+  // Aplicar margens se existirem
+  if (parent.margin_start && parent.margin_start > 0) {
+    earliestStart.setDate(earliestStart.getDate() - Math.ceil(parent.margin_start))
+  }
+  if (parent.margin_end && parent.margin_end > 0) {
+    latestEnd.setDate(latestEnd.getDate() + Math.ceil(parent.margin_end))
+  }
+
+  // Calcular nova duração
+  const newDuration = Math.max(1, Math.ceil((latestEnd.getTime() - earliestStart.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+
+  // Formatar datas
+  const formattedStart = earliestStart.toISOString().split('T')[0]
+  const formattedEnd = latestEnd.toISOString().split('T')[0]
+
+  // Atualizar no banco apenas se houver mudança
+  if (parent.start_date !== formattedStart || parent.end_date !== formattedEnd || parent.duration !== newDuration) {
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        start_date: formattedStart,
+        end_date: formattedEnd,
+        duration: newDuration
+      })
+      .eq('id', parentId)
+
+    if (error) {
+      console.error('Erro ao recalcular tarefa pai:', error)
+      return
+    }
+
+    // Se a tarefa pai também tem um pai, recalcular recursivamente
+    if (parent.parent_id) {
+      await recalculateParentDatesFromSubtasks(parent.parent_id)
+    }
+  }
+}
+// ========== FIM FUNÇÃO AUXILIAR ==========
+
 // Função para atualizar duração da tarefa ou margem
 async function updateTaskDuration(taskId: string, newDuration: number, edge: 'start' | 'end' = 'end') {
   // Arredondar para múltiplos de 0.125 (1 hora)
@@ -634,40 +854,20 @@ async function updateTaskDuration(taskId: string, newDuration: number, edge: 'st
       }
     }
 
-    // ========== AJUSTE DE TAREFA PAI SE FOR SUBTAREFA ==========
+    // ========== RECALCULAR TAREFA PAI SE FOR SUBTAREFA ==========
     if (task.parent_id) {
-      const parentTask = tasks.find(t => t.id === task.parent_id)
-      if (parentTask) {
-        const siblings = tasks.filter(t => t.parent_id === parentTask.id)
-        const maxSubtaskDuration = Math.max(
-          ...siblings.map(s => s.id === taskId ? finalDuration : s.duration || 0)
-        )
-
-        if (maxSubtaskDuration > (parentTask.duration || 0)) {
-          // Atualizar duração da tarefa pai
-          if (parentTask.start_date) {
-            const newParentEndDate = new Date(parentTask.start_date)
-            newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
-
-            await supabase
-              .from('tasks')
-              .update({
-                duration: maxSubtaskDuration,
-                end_date: newParentEndDate.toISOString().split('T')[0]
-              })
-              .eq('id', parentTask.id)
-          } else {
-            await supabase
-              .from('tasks')
-              .update({ duration: maxSubtaskDuration })
-              .eq('id', parentTask.id)
-          }
-        }
-      }
+      await recalculateParentDatesFromSubtasks(task.parent_id)
     }
-    // ========== FIM AJUSTE ==========
+    // ========== FIM RECALCULAR ==========
 
     // ========== NOVO: Recalcular tarefas dependentes em cascata ==========
+    // IMPORTANTE: Atualizar dados localmente ANTES de processar cascata
+    // Isso garante que as linhas de predecessor usem as datas corretas
+    onRefresh()
+
+    // Aguardar um frame para garantir que o refresh foi processado
+    await new Promise(resolve => setTimeout(resolve, 50))
+
     // Buscar dados atualizados do banco para garantir que temos as datas corretas
     const { data: updatedTasks, error: fetchError } = await supabase
       .from('tasks')
@@ -676,7 +876,7 @@ async function updateTaskDuration(taskId: string, newDuration: number, edge: 'st
       .order('sort_order')
 
     if (fetchError) {
-      onRefresh()
+      console.error('Erro ao buscar tarefas atualizadas:', fetchError)
       return
     }
 
@@ -690,9 +890,6 @@ async function updateTaskDuration(taskId: string, newDuration: number, edge: 'st
       // Há tarefas dependentes que precisam ser recalculadas
       setPendingUpdates(updates)
       setShowRecalculateModal(true)
-    } else {
-      // Sem dependentes, apenas recarrega
-      onRefresh()
     }
     // ========== FIM NOVO ==========
 
@@ -848,16 +1045,93 @@ async function handleAuditConflicts() {
       return
     }
 
-    // Executar auditoria
+    // PRIMEIRO: Verificar se há datas de pais desatualizadas
+    const parentTasks = allTasks.filter(task =>
+      allTasks.some(t => t.parent_id === task.id)
+    )
+
+    let parentsNeedSync = 0
+    for (const parent of parentTasks) {
+      const subtasks = allTasks.filter(t => t.parent_id === parent.id && t.start_date && t.end_date)
+      if (subtasks.length === 0) continue
+
+      const startDates = subtasks.map(st => new Date(st.start_date!))
+      const endDates = subtasks.map(st => new Date(st.end_date!))
+
+      const earliestStart = new Date(Math.min(...startDates.map(d => d.getTime())))
+      const latestEnd = new Date(Math.max(...endDates.map(d => d.getTime())))
+
+      const formattedStart = earliestStart.toISOString().split('T')[0]
+      const formattedEnd = latestEnd.toISOString().split('T')[0]
+
+      if (parent.start_date !== formattedStart || parent.end_date !== formattedEnd) {
+        parentsNeedSync++
+      }
+    }
+
+    // Se há pais desatualizados, avisar o usuário
+    if (parentsNeedSync > 0) {
+      const userChoice = confirm(
+        `⚠️ Datas Desatualizadas Detectadas\n\n` +
+        `Encontradas ${parentsNeedSync} tarefa(s) pai com datas desatualizadas.\n\n` +
+        `Isso pode causar falsos conflitos de predecessores.\n\n` +
+        `Deseja SINCRONIZAR as datas primeiro antes de verificar conflitos?\n\n` +
+        `• Clique OK para sincronizar agora (recomendado)\n` +
+        `• Clique Cancelar para verificar conflitos mesmo assim`
+      )
+
+      if (userChoice) {
+        // Executar sincronização e parar aqui
+        await syncAllParentDates()
+        // NÃO continuar com verificação de conflitos
+        return
+      }
+      // Se cancelar, continua com a verificação (mas avisar novamente)
+      const confirmProceed = confirm(
+        `⚠️ Atenção\n\n` +
+        `Você escolheu não sincronizar as datas.\n\n` +
+        `A verificação de conflitos pode reportar FALSOS POSITIVOS devido às datas desatualizadas.\n\n` +
+        `Tem certeza que deseja continuar mesmo assim?`
+      )
+
+      if (!confirmProceed) {
+        // Usuário desistiu
+        return
+      }
+    }
+
+    // Executar auditoria de conflitos (somente se não sincronizou OU se usuário confirmou prosseguir)
     const conflicts = auditPredecessorConflicts(allTasks, allPredecessors)
 
-    if (conflicts.length === 0) {
+    // Filtrar conflitos que são apenas de tarefas pai (possivelmente falsos positivos)
+    const filteredConflicts = conflicts.filter(conflict => {
+      const task = allTasks.find(t => t.id === conflict.id)
+      // Verificar se é uma tarefa pai
+      const isParent = allTasks.some(t => t.parent_id === task?.id)
+
+      // Se não é pai, manter o conflito
+      if (!isParent) return true
+
+      // Se é pai, verificar se as datas das subtarefas realmente estão em conflito
+      const subtasks = allTasks.filter(t => t.parent_id === task?.id && t.start_date && t.end_date)
+      if (subtasks.length === 0) return true
+
+      const startDates = subtasks.map(st => new Date(st.start_date!))
+      const earliestChildStart = new Date(Math.min(...startDates.map(d => d.getTime())))
+      const proposedParentStart = new Date(conflict.start_date)
+
+      // Se a data proposta para o pai é DEPOIS do início real das subtarefas, é um conflito real
+      // (significa que o predecessor do pai está empurrando o pai, mas os filhos já começaram antes)
+      return proposedParentStart > earliestChildStart
+    })
+
+    if (filteredConflicts.length === 0) {
       // Sem conflitos encontrados!
       alert('✅ Nenhum conflito encontrado!\n\nTodas as tarefas estão sincronizadas corretamente com seus predecessores.')
       onRefresh()
     } else {
       // Conflitos encontrados - mostrar modal de recálculo
-      setPendingUpdates(conflicts)
+      setPendingUpdates(filteredConflicts)
       setShowRecalculateModal(true)
     }
   } catch (error) {
@@ -1306,6 +1580,21 @@ useEffect(() => {
               </p>
             </div>
             <div className="flex gap-2">
+              {/* Botão de Visualização para Apresentação */}
+              <button
+                onClick={() => router.push(`/projeto/${project.id}/apresentacao`)}
+                className="px-3 py-1 text-sm rounded bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700 transition-all shadow-md hover:shadow-lg"
+                title="Abrir visualização para apresentação e impressão"
+              >
+                📄 Abrir Visualização
+              </button>
+              <button
+                onClick={syncAllParentDates}
+                className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                title="Sincronizar datas de todas as tarefas pai com suas subtarefas"
+              >
+                🔄 Sincronizar Datas
+              </button>
               <button
                 onClick={handleAuditConflicts}
                 className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -1858,6 +2147,7 @@ useEffect(() => {
         />
       )}
       {/* ========== FIM NOVO ========== */}
+
     </>
   )
 }

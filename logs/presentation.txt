@@ -1,0 +1,249 @@
+GanttPresentationModal.tsx:104 [Presentation Modal] 8 tarefas raiz encontradas:
+GanttPresentationModal.tsx:107   1. PROJETO MECÂNICO | 08/10/2025 - 20/10/2025 | TEM FILHOS
+   2. PROJETO ELÉTRICO | 22/10/2025 - 23/10/2025 | TEM FILHOS
+   3. FABRICAÇÃO | 22/10/2025 - 31/10/2025 | TEM FILHOS
+   4. COMPRAS | 02/11/2025 - 07/11/2025 | TEM FILHOS
+   5. TRATAMENTO SUPERFICIAL | 03/11/2025 - 05/11/2025 | TEM FILHOS
+   6. MONTAGEM MECÂNICA | 06/11/2025 - 07/11/2025 | TEM FILHOS
+   7. ENTREGA | 13/11/2025 - 20/11/2025 | TEM FILHOS
+   8. MONTAGEM ELETRICA | 16/11/2025 - 18/11/2025 | TEM FILHOS
+ [Presentation Modal] Pai "PROJETO MECÂNICO" tem 6 filhos:
+   1. Reunião inicial de projeto | 08/10/2025 - 09/10/2025
+   2. Desenvolvimento (Pre-projeto) | 15/10/2025 - 17/10/2025
+   3. Modelamento 3D | 18/10/2025 - 19/10/2025
+   4. Detalhamento 2D | 20/10/2025 - 20/10/2025
+   5. Lista de materiais | 21/10/2025 - 21/10/2025
+   6. Aprovação Final | 22/10/2025 - 22/10/2025
+ [Presentation Modal] Pai "PROJETO ELÉTRICO" tem 2 filhos:
+   1. Desenvolvimento | 23/10/2025 - 23/10/2025
+   2. Lista de Materiais Pneumaticos | 24/10/2025 - 24/10/2025
+ [Presentation Modal] Pai "FABRICAÇÃO" tem 3 filhos:
+   1. Beneficiamento | 22/10/2025 - 23/10/2025
+   2. Usinagem | 24/10/2025 - 27/10/2025
+   3. PRE MONTAGEM | 30/10/2025 - 31/10/2025
+ [Presentation Modal] Pai "Beneficiamento" tem 1 filhos:
+   1. Corte serra (Perfil de aluminio) | 22/10/2025 - 23/10/2025
+ [Presentation Modal] Pai "Corte serra (Perfil de aluminio)" tem 4 filhos:
+   1. AC10260192-R01 (2 UNIDADES) | 22/10/2025 - 22/10/2025
+   2. AC10260200-R00 (2 UNIDADES) | 23/10/2025 - 23/10/2025
+   3. AC10260201-R00 (1 UNIDADES) | 24/10/2025 - 24/10/2025
+   4. AC10260185-R01 (1 UNIDADE) | 25/10/2025 - 25/10/2025
+ [Presentation Modal] Pai "Usinagem" tem 2 filhos:
+   1. Fresa | 24/10/2025 - 27/10/2025
+   2. CNC | 24/10/2025 - 27/10/2025
+ [Presentation Modal] Pai "Fresa" tem 3 filhos:
+   1. AC10260196-R00 (1 UNIDADE) | 24/10/2025 - 24/10/2025
+   2. AC10260202-R00 ( 1 UNIDADE) | 25/10/2025 - 25/10/2025
+   3. AC10260189-R01 ( 1 UNIDADE) | 26/10/2025 - 26/10/2025
+ [Presentation Modal] Pai "CNC" tem 4 filhos:
+   1. AC10260197-R00 (1 UNIDADE) | 24/10/2025 - 24/10/2025
+   2. AC10260204-R00 (1 UNIDADE) | 25/10/2025 - 25/10/2025
+   3. AC10260199-R00 (1 UNIDADE) | 27/10/2025 - 27/10/2025
+   4. AC10260203-R00 (2 UNIDADES) | 28/10/2025 - 28/10/2025
+ [Presentation Modal] Pai "PRE MONTAGEM" tem 2 filhos:
+   1. Montagem de Componentes | 30/10/2025 - 30/10/2025
+   2. Testes | 31/10/2025 - 31/10/2025
+ [Presentation Modal] Pai "COMPRAS" tem 6 filhos:
+   1. Galera metais | 22/10/2025 - 23/10/2025
+   2. SMC | 22/10/2025 - 24/10/2025
+   3. Kalatec | 22/10/2025 - 24/10/2025
+   4. Anfer (QT2025-11227A) | 22/10/2025 - 29/10/2025
+   5. Parafix | 22/10/2025 - 29/10/2025
+   6. Alumaker - Fixadores | 25/10/2025 - 25/10/2025
+ [Presentation Modal] Pai "TRATAMENTO SUPERFICIAL" tem 1 filhos:
+   1. Zinco branco | 03/11/2025 - 05/11/2025
+ [Presentation Modal] Pai "MONTAGEM MECÂNICA" tem 1 filhos:
+   1. Montagem da estrutura | 06/11/2025 - 07/11/2025
+ [Presentation Modal] Pai "ENTREGA" tem 7 filhos:
+   1. Embalagem | 12/11/2025 - 12/11/2025
+   2. Frete | 13/11/2025 - 13/11/2025
+   3. Try Out Cliente | 14/11/2025 - 14/11/2025
+   4. Instalação | 15/11/2025 - 16/11/2025
+   5. Programação | 18/11/2025 - 18/11/2025
+   6. Validação de testes | 19/11/2025 - 19/11/2025
+   7. Entrega Tecnica | 20/11/2025 - 21/11/2025
+ [Presentation Modal] Pai "MONTAGEM ELETRICA" tem 4 filhos:
+   1. montagem geral | 07/11/2025 - 07/11/2025
+   2. Try Out Interno | 10/11/2025 - 10/11/2025
+   3. Programação | 11/11/2025 - 11/11/2025
+   4. Testes de Parametros da Programação | 12/11/2025 - 12/11/2025
+ 
+[Presentation Modal] Ordem final (54 tarefas):
+ 01. 👨‍👦 PAI | 08/10/2025 - 20/10/2025 | PROJETO MECÂNICO
+ 02.    └ FILHO | 08/10/2025 - 09/10/2025 | Reunião inicial de projeto
+ 03.    └ FILHO | 15/10/2025 - 17/10/2025 | Desenvolvimento (Pre-projeto)
+ 04.    └ FILHO | 18/10/2025 - 19/10/2025 | Modelamento 3D
+ 05.    └ FILHO | 20/10/2025 - 20/10/2025 | Detalhamento 2D
+ 06.    └ FILHO | 21/10/2025 - 21/10/2025 | Lista de materiais
+ 07.    └ FILHO | 22/10/2025 - 22/10/2025 | Aprovação Final
+ 08. 👨‍👦 PAI | 22/10/2025 - 23/10/2025 | PROJETO ELÉTRICO
+ 09.    └ FILHO | 23/10/2025 - 23/10/2025 | Desenvolvimento
+ 10.    └ FILHO | 24/10/2025 - 24/10/2025 | Lista de Materiais Pneumaticos
+ 11. 👨‍👦 PAI | 22/10/2025 - 31/10/2025 | FABRICAÇÃO
+ 12. 👨‍👦 PAI | 22/10/2025 - 23/10/2025 | Beneficiamento
+ 13. 👨‍👦 PAI | 22/10/2025 - 23/10/2025 | Corte serra (Perfil de aluminio)
+ 14.    └ FILHO | 22/10/2025 - 22/10/2025 | AC10260192-R01 (2 UNIDADES)
+ 15.    └ FILHO | 23/10/2025 - 23/10/2025 | AC10260200-R00 (2 UNIDADES)
+ 16.    └ FILHO | 24/10/2025 - 24/10/2025 | AC10260201-R00 (1 UNIDADES)
+ 17.    └ FILHO | 25/10/2025 - 25/10/2025 | AC10260185-R01 (1 UNIDADE)
+ 18. 👨‍👦 PAI | 24/10/2025 - 27/10/2025 | Usinagem
+ 19. 👨‍👦 PAI | 24/10/2025 - 27/10/2025 | Fresa
+ 20.    └ FILHO | 24/10/2025 - 24/10/2025 | AC10260196-R00 (1 UNIDADE)
+ 21.    └ FILHO | 25/10/2025 - 25/10/2025 | AC10260202-R00 ( 1 UNIDADE)
+ 22.    └ FILHO | 26/10/2025 - 26/10/2025 | AC10260189-R01 ( 1 UNIDADE)
+ 23. 👨‍👦 PAI | 24/10/2025 - 27/10/2025 | CNC
+ 24.    └ FILHO | 24/10/2025 - 24/10/2025 | AC10260197-R00 (1 UNIDADE)
+ 25.    └ FILHO | 25/10/2025 - 25/10/2025 | AC10260204-R00 (1 UNIDADE)
+ 26.    └ FILHO | 27/10/2025 - 27/10/2025 | AC10260199-R00 (1 UNIDADE)
+ 27.    └ FILHO | 28/10/2025 - 28/10/2025 | AC10260203-R00 (2 UNIDADES)
+ 28. 👨‍👦 PAI | 30/10/2025 - 31/10/2025 | PRE MONTAGEM
+ 29.    └ FILHO | 30/10/2025 - 30/10/2025 | Montagem de Componentes
+ 30.    └ FILHO | 31/10/2025 - 31/10/2025 | Testes
+ 31. 👨‍👦 PAI | 02/11/2025 - 07/11/2025 | COMPRAS
+ 32.    └ FILHO | 22/10/2025 - 23/10/2025 | Galera metais
+ 33.    └ FILHO | 22/10/2025 - 24/10/2025 | SMC
+ 34.    └ FILHO | 22/10/2025 - 24/10/2025 | Kalatec
+ 35.    └ FILHO | 22/10/2025 - 29/10/2025 | Anfer (QT2025-11227A)
+ 36.    └ FILHO | 22/10/2025 - 29/10/2025 | Parafix
+ 37.    └ FILHO | 25/10/2025 - 25/10/2025 | Alumaker - Fixadores
+ 38. 👨‍👦 PAI | 03/11/2025 - 05/11/2025 | TRATAMENTO SUPERFICIAL
+ 39.    └ FILHO | 03/11/2025 - 05/11/2025 | Zinco branco
+ 40. 👨‍👦 PAI | 06/11/2025 - 07/11/2025 | MONTAGEM MECÂNICA
+ 41.    └ FILHO | 06/11/2025 - 07/11/2025 | Montagem da estrutura
+ 42. 👨‍👦 PAI | 13/11/2025 - 20/11/2025 | ENTREGA
+ 43.    └ FILHO | 12/11/2025 - 12/11/2025 | Embalagem
+GanttPresentationModal.tsx:117 44.    └ FILHO | 13/11/2025 - 13/11/2025 | Frete
+GanttPresentationModal.tsx:117 45.    └ FILHO | 14/11/2025 - 14/11/2025 | Try Out Cliente
+GanttPresentationModal.tsx:117 46.    └ FILHO | 15/11/2025 - 16/11/2025 | Instalação
+GanttPresentationModal.tsx:117 47.    └ FILHO | 18/11/2025 - 18/11/2025 | Programação
+GanttPresentationModal.tsx:117 48.    └ FILHO | 19/11/2025 - 19/11/2025 | Validação de testes
+GanttPresentationModal.tsx:117 49.    └ FILHO | 20/11/2025 - 21/11/2025 | Entrega Tecnica
+GanttPresentationModal.tsx:117 50. 👨‍👦 PAI | 16/11/2025 - 18/11/2025 | MONTAGEM ELETRICA
+GanttPresentationModal.tsx:117 51.    └ FILHO | 07/11/2025 - 07/11/2025 | montagem geral
+GanttPresentationModal.tsx:117 52.    └ FILHO | 10/11/2025 - 10/11/2025 | Try Out Interno
+GanttPresentationModal.tsx:117 53.    └ FILHO | 11/11/2025 - 11/11/2025 | Programação
+GanttPresentationModal.tsx:117 54.    └ FILHO | 12/11/2025 - 12/11/2025 | Testes de Parametros da Programação
+GanttPresentationModal.tsx:104 [Presentation Modal] 8 tarefas raiz encontradas:
+GanttPresentationModal.tsx:107   1. PROJETO MECÂNICO | 08/10/2025 - 20/10/2025 | TEM FILHOS
+GanttPresentationModal.tsx:107   2. PROJETO ELÉTRICO | 22/10/2025 - 23/10/2025 | TEM FILHOS
+GanttPresentationModal.tsx:107   3. FABRICAÇÃO | 22/10/2025 - 31/10/2025 | TEM FILHOS
+GanttPresentationModal.tsx:107   4. COMPRAS | 02/11/2025 - 07/11/2025 | TEM FILHOS
+GanttPresentationModal.tsx:107   5. TRATAMENTO SUPERFICIAL | 03/11/2025 - 05/11/2025 | TEM FILHOS
+GanttPresentationModal.tsx:107   6. MONTAGEM MECÂNICA | 06/11/2025 - 07/11/2025 | TEM FILHOS
+GanttPresentationModal.tsx:107   7. ENTREGA | 13/11/2025 - 20/11/2025 | TEM FILHOS
+GanttPresentationModal.tsx:107   8. MONTAGEM ELETRICA | 16/11/2025 - 18/11/2025 | TEM FILHOS
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "PROJETO MECÂNICO" tem 6 filhos:
+GanttPresentationModal.tsx:88   1. Reunião inicial de projeto | 08/10/2025 - 09/10/2025
+GanttPresentationModal.tsx:88   2. Desenvolvimento (Pre-projeto) | 15/10/2025 - 17/10/2025
+GanttPresentationModal.tsx:88   3. Modelamento 3D | 18/10/2025 - 19/10/2025
+GanttPresentationModal.tsx:88   4. Detalhamento 2D | 20/10/2025 - 20/10/2025
+GanttPresentationModal.tsx:88   5. Lista de materiais | 21/10/2025 - 21/10/2025
+GanttPresentationModal.tsx:88   6. Aprovação Final | 22/10/2025 - 22/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "PROJETO ELÉTRICO" tem 2 filhos:
+GanttPresentationModal.tsx:88   1. Desenvolvimento | 23/10/2025 - 23/10/2025
+GanttPresentationModal.tsx:88   2. Lista de Materiais Pneumaticos | 24/10/2025 - 24/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "FABRICAÇÃO" tem 3 filhos:
+GanttPresentationModal.tsx:88   1. Beneficiamento | 22/10/2025 - 23/10/2025
+GanttPresentationModal.tsx:88   2. Usinagem | 24/10/2025 - 27/10/2025
+GanttPresentationModal.tsx:88   3. PRE MONTAGEM | 30/10/2025 - 31/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "Beneficiamento" tem 1 filhos:
+GanttPresentationModal.tsx:88   1. Corte serra (Perfil de aluminio) | 22/10/2025 - 23/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "Corte serra (Perfil de aluminio)" tem 4 filhos:
+GanttPresentationModal.tsx:88   1. AC10260192-R01 (2 UNIDADES) | 22/10/2025 - 22/10/2025
+GanttPresentationModal.tsx:88   2. AC10260200-R00 (2 UNIDADES) | 23/10/2025 - 23/10/2025
+GanttPresentationModal.tsx:88   3. AC10260201-R00 (1 UNIDADES) | 24/10/2025 - 24/10/2025
+GanttPresentationModal.tsx:88   4. AC10260185-R01 (1 UNIDADE) | 25/10/2025 - 25/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "Usinagem" tem 2 filhos:
+GanttPresentationModal.tsx:88   1. Fresa | 24/10/2025 - 27/10/2025
+GanttPresentationModal.tsx:88   2. CNC | 24/10/2025 - 27/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "Fresa" tem 3 filhos:
+GanttPresentationModal.tsx:88   1. AC10260196-R00 (1 UNIDADE) | 24/10/2025 - 24/10/2025
+GanttPresentationModal.tsx:88   2. AC10260202-R00 ( 1 UNIDADE) | 25/10/2025 - 25/10/2025
+GanttPresentationModal.tsx:88   3. AC10260189-R01 ( 1 UNIDADE) | 26/10/2025 - 26/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "CNC" tem 4 filhos:
+GanttPresentationModal.tsx:88   1. AC10260197-R00 (1 UNIDADE) | 24/10/2025 - 24/10/2025
+GanttPresentationModal.tsx:88   2. AC10260204-R00 (1 UNIDADE) | 25/10/2025 - 25/10/2025
+GanttPresentationModal.tsx:88   3. AC10260199-R00 (1 UNIDADE) | 27/10/2025 - 27/10/2025
+GanttPresentationModal.tsx:88   4. AC10260203-R00 (2 UNIDADES) | 28/10/2025 - 28/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "PRE MONTAGEM" tem 2 filhos:
+GanttPresentationModal.tsx:88   1. Montagem de Componentes | 30/10/2025 - 30/10/2025
+GanttPresentationModal.tsx:88   2. Testes | 31/10/2025 - 31/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "COMPRAS" tem 6 filhos:
+GanttPresentationModal.tsx:88   1. Galera metais | 22/10/2025 - 23/10/2025
+GanttPresentationModal.tsx:88   2. SMC | 22/10/2025 - 24/10/2025
+GanttPresentationModal.tsx:88   3. Kalatec | 22/10/2025 - 24/10/2025
+GanttPresentationModal.tsx:88   4. Anfer (QT2025-11227A) | 22/10/2025 - 29/10/2025
+GanttPresentationModal.tsx:88   5. Parafix | 22/10/2025 - 29/10/2025
+GanttPresentationModal.tsx:88   6. Alumaker - Fixadores | 25/10/2025 - 25/10/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "TRATAMENTO SUPERFICIAL" tem 1 filhos:
+GanttPresentationModal.tsx:88   1. Zinco branco | 03/11/2025 - 05/11/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "MONTAGEM MECÂNICA" tem 1 filhos:
+GanttPresentationModal.tsx:88   1. Montagem da estrutura | 06/11/2025 - 07/11/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "ENTREGA" tem 7 filhos:
+GanttPresentationModal.tsx:88   1. Embalagem | 12/11/2025 - 12/11/2025
+GanttPresentationModal.tsx:88   2. Frete | 13/11/2025 - 13/11/2025
+GanttPresentationModal.tsx:88   3. Try Out Cliente | 14/11/2025 - 14/11/2025
+GanttPresentationModal.tsx:88   4. Instalação | 15/11/2025 - 16/11/2025
+GanttPresentationModal.tsx:88   5. Programação | 18/11/2025 - 18/11/2025
+GanttPresentationModal.tsx:88   6. Validação de testes | 19/11/2025 - 19/11/2025
+GanttPresentationModal.tsx:88   7. Entrega Tecnica | 20/11/2025 - 21/11/2025
+GanttPresentationModal.tsx:86 [Presentation Modal] Pai "MONTAGEM ELETRICA" tem 4 filhos:
+GanttPresentationModal.tsx:88   1. montagem geral | 07/11/2025 - 07/11/2025
+GanttPresentationModal.tsx:88   2. Try Out Interno | 10/11/2025 - 10/11/2025
+GanttPresentationModal.tsx:88   3. Programação | 11/11/2025 - 11/11/2025
+GanttPresentationModal.tsx:88   4. Testes de Parametros da Programação | 12/11/2025 - 12/11/2025
+GanttPresentationModal.tsx:112 [Presentation Modal] Ordem final (54 tarefas):
+GanttPresentationModal.tsx:117 01. 👨‍👦 PAI | 08/10/2025 - 20/10/2025 | PROJETO MECÂNICO
+GanttPresentationModal.tsx:117 02.    └ FILHO | 08/10/2025 - 09/10/2025 | Reunião inicial de projeto
+GanttPresentationModal.tsx:117 03.    └ FILHO | 15/10/2025 - 17/10/2025 | Desenvolvimento (Pre-projeto)
+GanttPresentationModal.tsx:117 04.    └ FILHO | 18/10/2025 - 19/10/2025 | Modelamento 3D
+GanttPresentationModal.tsx:117 05.    └ FILHO | 20/10/2025 - 20/10/2025 | Detalhamento 2D
+GanttPresentationModal.tsx:117 06.    └ FILHO | 21/10/2025 - 21/10/2025 | Lista de materiais
+GanttPresentationModal.tsx:117 07.    └ FILHO | 22/10/2025 - 22/10/2025 | Aprovação Final
+GanttPresentationModal.tsx:117 08. 👨‍👦 PAI | 22/10/2025 - 23/10/2025 | PROJETO ELÉTRICO
+GanttPresentationModal.tsx:117 09.    └ FILHO | 23/10/2025 - 23/10/2025 | Desenvolvimento
+GanttPresentationModal.tsx:117 10.    └ FILHO | 24/10/2025 - 24/10/2025 | Lista de Materiais Pneumaticos
+GanttPresentationModal.tsx:117 11. 👨‍👦 PAI | 22/10/2025 - 31/10/2025 | FABRICAÇÃO
+GanttPresentationModal.tsx:117 12. 👨‍👦 PAI | 22/10/2025 - 23/10/2025 | Beneficiamento
+GanttPresentationModal.tsx:117 13. 👨‍👦 PAI | 22/10/2025 - 23/10/2025 | Corte serra (Perfil de aluminio)
+GanttPresentationModal.tsx:117 14.    └ FILHO | 22/10/2025 - 22/10/2025 | AC10260192-R01 (2 UNIDADES)
+GanttPresentationModal.tsx:117 15.    └ FILHO | 23/10/2025 - 23/10/2025 | AC10260200-R00 (2 UNIDADES)
+GanttPresentationModal.tsx:117 16.    └ FILHO | 24/10/2025 - 24/10/2025 | AC10260201-R00 (1 UNIDADES)
+GanttPresentationModal.tsx:117 17.    └ FILHO | 25/10/2025 - 25/10/2025 | AC10260185-R01 (1 UNIDADE)
+GanttPresentationModal.tsx:117 18. 👨‍👦 PAI | 24/10/2025 - 27/10/2025 | Usinagem
+GanttPresentationModal.tsx:117 19. 👨‍👦 PAI | 24/10/2025 - 27/10/2025 | Fresa
+GanttPresentationModal.tsx:117 20.    └ FILHO | 24/10/2025 - 24/10/2025 | AC10260196-R00 (1 UNIDADE)
+GanttPresentationModal.tsx:117 21.    └ FILHO | 25/10/2025 - 25/10/2025 | AC10260202-R00 ( 1 UNIDADE)
+GanttPresentationModal.tsx:117 22.    └ FILHO | 26/10/2025 - 26/10/2025 | AC10260189-R01 ( 1 UNIDADE)
+GanttPresentationModal.tsx:117 23. 👨‍👦 PAI | 24/10/2025 - 27/10/2025 | CNC
+GanttPresentationModal.tsx:117 24.    └ FILHO | 24/10/2025 - 24/10/2025 | AC10260197-R00 (1 UNIDADE)
+GanttPresentationModal.tsx:117 25.    └ FILHO | 25/10/2025 - 25/10/2025 | AC10260204-R00 (1 UNIDADE)
+GanttPresentationModal.tsx:117 26.    └ FILHO | 27/10/2025 - 27/10/2025 | AC10260199-R00 (1 UNIDADE)
+GanttPresentationModal.tsx:117 27.    └ FILHO | 28/10/2025 - 28/10/2025 | AC10260203-R00 (2 UNIDADES)
+GanttPresentationModal.tsx:117 28. 👨‍👦 PAI | 30/10/2025 - 31/10/2025 | PRE MONTAGEM
+GanttPresentationModal.tsx:117 29.    └ FILHO | 30/10/2025 - 30/10/2025 | Montagem de Componentes
+GanttPresentationModal.tsx:117 30.    └ FILHO | 31/10/2025 - 31/10/2025 | Testes
+GanttPresentationModal.tsx:117 31. 👨‍👦 PAI | 02/11/2025 - 07/11/2025 | COMPRAS
+GanttPresentationModal.tsx:117 32.    └ FILHO | 22/10/2025 - 23/10/2025 | Galera metais
+GanttPresentationModal.tsx:117 33.    └ FILHO | 22/10/2025 - 24/10/2025 | SMC
+GanttPresentationModal.tsx:117 34.    └ FILHO | 22/10/2025 - 24/10/2025 | Kalatec
+GanttPresentationModal.tsx:117 35.    └ FILHO | 22/10/2025 - 29/10/2025 | Anfer (QT2025-11227A)
+GanttPresentationModal.tsx:117 36.    └ FILHO | 22/10/2025 - 29/10/2025 | Parafix
+GanttPresentationModal.tsx:117 37.    └ FILHO | 25/10/2025 - 25/10/2025 | Alumaker - Fixadores
+GanttPresentationModal.tsx:117 38. 👨‍👦 PAI | 03/11/2025 - 05/11/2025 | TRATAMENTO SUPERFICIAL
+GanttPresentationModal.tsx:117 39.    └ FILHO | 03/11/2025 - 05/11/2025 | Zinco branco
+GanttPresentationModal.tsx:117 40. 👨‍👦 PAI | 06/11/2025 - 07/11/2025 | MONTAGEM MECÂNICA
+GanttPresentationModal.tsx:117 41.    └ FILHO | 06/11/2025 - 07/11/2025 | Montagem da estrutura
+GanttPresentationModal.tsx:117 42. 👨‍👦 PAI | 13/11/2025 - 20/11/2025 | ENTREGA
+GanttPresentationModal.tsx:117 43.    └ FILHO | 12/11/2025 - 12/11/2025 | Embalagem
+GanttPresentationModal.tsx:117 44.    └ FILHO | 13/11/2025 - 13/11/2025 | Frete
+GanttPresentationModal.tsx:117 45.    └ FILHO | 14/11/2025 - 14/11/2025 | Try Out Cliente
+GanttPresentationModal.tsx:117 46.    └ FILHO | 15/11/2025 - 16/11/2025 | Instalação
+GanttPresentationModal.tsx:117 47.    └ FILHO | 18/11/2025 - 18/11/2025 | Programação
+GanttPresentationModal.tsx:117 48.    └ FILHO | 19/11/2025 - 19/11/2025 | Validação de testes
+GanttPresentationModal.tsx:117 49.    └ FILHO | 20/11/2025 - 21/11/2025 | Entrega Tecnica
+GanttPresentationModal.tsx:117 50. 👨‍👦 PAI | 16/11/2025 - 18/11/2025 | MONTAGEM ELETRICA
+GanttPresentationModal.tsx:117 51.    └ FILHO | 07/11/2025 - 07/11/2025 | montagem geral
+GanttPresentationModal.tsx:117 52.    └ FILHO | 10/11/2025 - 10/11/2025 | Try Out Interno
+GanttPresentationModal.tsx:117 53.    └ FILHO | 11/11/2025 - 11/11/2025 | Programação
+GanttPresentationModal.tsx:117 54.    └ FILHO | 12/11/2025 - 12/11/2025 | Testes de Parametros da Programação
