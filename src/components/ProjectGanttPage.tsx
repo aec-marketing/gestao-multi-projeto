@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import type { Project, Task, Resource } from '@/types/database.types'
 import type { Allocation } from '@/types/allocation.types'
 import GanttViewTab from '@/components/project-views/GanttViewTab'
-import TableViewTab from '@/components/project-views/TableViewTab'
+import TableViewTab from '@/components/table-view/TableViewTab'
 import TimelineViewTab from './project-views/TimelineViewTab'
 import FinancialViewTab from '@/components/project-views/FinancialViewTab'
 import PredecessorViewTab from './project-views/PredecessorViewTab'
@@ -260,13 +260,7 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
 )}
         {viewMode === 'table' && (
           <ComponentErrorBoundary componentName="Table View" onReset={loadProjectData}>
-            <TableViewTab
-              project={project}
-              tasks={tasks}
-              resources={resources}
-              allocations={allocations}
-              onRefresh={loadProjectData}
-            />
+            <TableViewTab project={project} />
           </ComponentErrorBoundary>
         )}
 

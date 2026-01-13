@@ -117,6 +117,7 @@ export type Database = {
           outline_level: number | null
           wbs_code: string | null
           is_summary: boolean
+          lag_days: number
           created_at: string
           updated_at: string
         }
@@ -138,6 +139,7 @@ export type Database = {
           actual_cost?: number
           margin_start?: number
           margin_end?: number
+          lag_days?: number
         }
         Update: {
           id?: string
@@ -157,10 +159,10 @@ export type Database = {
           actual_cost?: number
           margin_start?: number
           margin_end?: number
-          // ===== ADICIONAR ESTES 3 CAMPOS =====
           outline_level?: number
           wbs_code?: string | null
           is_summary?: boolean
+          lag_days?: number
         }
       }
     }

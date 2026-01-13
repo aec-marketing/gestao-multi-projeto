@@ -8,6 +8,11 @@ import { supabase } from '@/lib/supabase'
 import { recalculateTasksInCascade, validateTaskStartDate } from '@/utils/predecessorCalculations'
 import RecalculateModal from '@/components/modals/RecalculateModal'
 import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
+import TableViewErrorBoundary from '@/components/error-boundary/TableViewErrorBoundary'
+import { LoadingOverlay } from '@/components/ui/LoadingOverlay'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { ConfirmModal } from '@/components/modals/ConfirmModal'
+import { Toast } from '@/components/ui/Toast'
 
 interface TableViewTabProps {
   project: Project
@@ -52,6 +57,32 @@ const [newSubtaskData, setNewSubtaskData] = useState({
 const [searchTerm, setSearchTerm] = useState('')
 const [sortBy, setSortBy] = useState<'name' | 'type' | 'duration' | 'progress'>('name')
 const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+
+// Estados para loading e confirmação
+const [isLoading, setIsLoading] = useState(false)
+const [loadingMessage, setLoadingMessage] = useState('')
+const [confirmModal, setConfirmModal] = useState<{
+  isOpen: boolean
+  title: string
+  message: string
+  onConfirm: () => void | Promise<void>
+  variant: 'danger' | 'warning' | 'info'
+} | null>(null)
+
+// Estados para controle de edição
+const [pendingChanges, setPendingChanges] = useState<Map<string, {
+  taskId: string
+  field: string
+  value: any
+  originalValue: any
+  taskName: string
+}>>(new Map())
+
+// Estado para toast notifications
+const [toast, setToast] = useState<{
+  message: string
+  type: 'success' | 'error' | 'info' | 'saving'
+} | null>(null)
 
   // Load predecessors
   useEffect(() => {
@@ -143,122 +174,190 @@ function getTaskColorClass(type: string): string {
   }
   return colors[type] || 'bg-gray-100 text-gray-800'
 }
-// ADICIONE ESTA FUNÇÃO:
-async function updateTask(taskId: string, field: string, value: string | number) {
+// Função auxiliar para comparar valores
+function valuesAreEqual(value1: any, value2: any): boolean {
+  // Normalizar valores vazios
+  const normalize = (val: any) => {
+    if (val === null || val === undefined || val === '') return null
+    if (typeof val === 'string') return val.trim()
+    return val
+  }
+
+  const v1 = normalize(value1)
+  const v2 = normalize(value2)
+
+  return v1 === v2
+}
+
+// Função para adicionar mudança pendente
+function addPendingChange(taskId: string, field: string, value: any, originalValue: any) {
+  // Verificar se o valor realmente mudou
+  if (valuesAreEqual(value, originalValue)) {
+    // Valor não mudou, remover da lista de pendentes se existir
+    const key = `${taskId}-${field}`
+    setPendingChanges(prev => {
+      const newMap = new Map(prev)
+      newMap.delete(key)
+      return newMap
+    })
+    return
+  }
+
+  // Adicionar à lista de mudanças pendentes
+  const key = `${taskId}-${field}`
+  const task = tasks.find(t => t.id === taskId)
+
+  setPendingChanges(prev => new Map(prev).set(key, {
+    taskId,
+    field,
+    value,
+    originalValue,
+    taskName: task?.name || 'Tarefa'
+  }))
+}
+
+// Função para salvar todas as mudanças pendentes
+async function saveAllChanges() {
+  if (pendingChanges.size === 0) return
+
+  setIsLoading(true)
+  setLoadingMessage(`Salvando ${pendingChanges.size} alteração(ões)...`)
+
   try {
     const { syncTaskFields } = await import('@/utils/taskDateSync')
+    let successCount = 0
+    let errorCount = 0
+    const errors: string[] = []
 
-    const updates: any = {}
+    for (const [key, change] of pendingChanges.entries()) {
+      try {
+        const { taskId, field, value } = change
+        const updates: any = {}
 
-    // Determinar qual campo atualizar
-    if (field === 'name') {
-      updates.name = value
-    } else if (field === 'estimated_cost') {
-      updates.estimated_cost = value ? parseFloat(value as string) : 0
-    } else if (field === 'actual_cost') {
-      updates.actual_cost = value ? parseFloat(value as string) : 0
-    } else if (field === 'duration' || field === 'start_date' || field === 'end_date') {
-      // ========== NOVO: Sincronizar datas e duração ==========
-      const currentTask = tasks.find(t => t.id === taskId)
-      if (!currentTask) throw new Error('Tarefa não encontrada')
+        // Determinar qual campo atualizar
+        if (field === 'name') {
+          updates.name = value
+        } else if (field === 'estimated_cost') {
+          updates.estimated_cost = value ? parseFloat(value as string) : 0
+        } else if (field === 'actual_cost') {
+          updates.actual_cost = value ? parseFloat(value as string) : 0
+        } else if (field === 'duration' || field === 'start_date' || field === 'end_date') {
+          // Sincronizar datas e duração
+          const currentTask = tasks.find(t => t.id === taskId)
+          if (!currentTask) throw new Error('Tarefa não encontrada')
 
-      // Sincronizar campos relacionados
-      const syncedFields = syncTaskFields(
-        field as 'start_date' | 'end_date' | 'duration',
-        field === 'duration' ? parseFloat(value as string) : value,
-        {
-          start_date: currentTask.start_date,
-          end_date: currentTask.end_date,
-          duration: currentTask.duration
+          // Sincronizar campos relacionados
+          const syncedFields = syncTaskFields(
+            field as 'start_date' | 'end_date' | 'duration',
+            field === 'duration' ? parseFloat(value as string) : value,
+            {
+              start_date: currentTask.start_date,
+              end_date: currentTask.end_date,
+              duration: currentTask.duration
+            }
+          )
+
+          // Validação de predecessor
+          if (field === 'start_date' || field === 'end_date') {
+            const newStartDate = field === 'start_date'
+              ? new Date(value as string)
+              : new Date(syncedFields.start_date || currentTask.start_date!)
+
+            const validation = validateTaskStartDate(
+              currentTask,
+              newStartDate,
+              tasks,
+              predecessors
+            )
+
+            if (!validation.isValid) {
+              errors.push(`${change.taskName}: ${validation.message}`)
+              errorCount++
+              continue // Pular esta atualização
+            }
+          }
+
+          Object.assign(updates, syncedFields)
         }
-      )
 
-      // ========== VALIDAÇÃO DE PREDECESSOR ==========
-      if (field === 'start_date' || field === 'end_date') {
-        // Validar se a nova data conflita com predecessores
-        const newStartDate = field === 'start_date'
-          ? new Date(value as string)
-          : new Date(syncedFields.start_date || currentTask.start_date!)
+        const { error } = await supabase
+          .from('tasks')
+          .update(updates)
+          .eq('id', taskId)
 
-        const validation = validateTaskStartDate(
-          currentTask,
-          newStartDate,
-          tasks,
-          predecessors
-        )
+        if (error) throw error
 
-        if (!validation.isValid) {
-          alert(`❌ Data inválida!\n\n${validation.message}\n\nA mudança foi cancelada para manter a consistência do projeto.`)
-          return // Não salva a mudança
-        }
-      }
-      // ========== FIM VALIDAÇÃO ==========
+        // Ajuste de duração da tarefa pai
+        const updatedTask = tasks.find(t => t.id === taskId)
+        if (updatedTask?.parent_id && field === 'duration') {
+          const parentTask = tasks.find(t => t.id === updatedTask.parent_id)
+          if (parentTask) {
+            const siblings = tasks.filter(t => t.parent_id === parentTask.id)
+            const maxSubtaskDuration = Math.max(
+              ...siblings.map(s => s.id === taskId ? parseFloat(value as string) : s.duration || 0)
+            )
 
-      // Adicionar todos os campos sincronizados ao update
-      Object.assign(updates, syncedFields)
-      // ========== FIM NOVO ==========
-    }
+            if (maxSubtaskDuration > (parentTask.duration || 0)) {
+              if (parentTask.start_date) {
+                const newParentEndDate = new Date(parentTask.start_date)
+                newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
 
-    const { error } = await supabase
-      .from('tasks')
-      .update(updates)
-      .eq('id', taskId)
-
-    if (error) throw error
-
-    // Check if we need to recalculate dependent tasks (for date/duration changes)
-    if (field === 'duration' || field === 'start_date' || field === 'end_date') {
-      const cascadeUpdates = recalculateTasksInCascade(taskId, tasks, predecessors)
-
-      if (cascadeUpdates.length > 0) {
-        setPendingUpdates(cascadeUpdates)
-        setShowRecalculateModal(true)
-        return // Don't refresh yet, wait for modal
-      }
-    }
-
-    // ========== AJUSTE DE DURAÇÃO DA TAREFA PAI ==========
-    // Se editou duração de uma subtarefa, verificar se tarefa pai precisa se ajustar
-    const updatedTask = tasks.find(t => t.id === taskId)
-    if (updatedTask?.parent_id && field === 'duration') {
-      const parentTask = tasks.find(t => t.id === updatedTask.parent_id)
-      if (parentTask) {
-        const siblings = tasks.filter(t => t.parent_id === parentTask.id)
-        const maxSubtaskDuration = Math.max(
-          ...siblings.map(s => s.id === taskId ? parseFloat(value as string) : s.duration || 0)
-        )
-
-        if (maxSubtaskDuration > (parentTask.duration || 0)) {
-          // Atualizar duração da tarefa pai
-          if (parentTask.start_date) {
-            const newParentEndDate = new Date(parentTask.start_date)
-            newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
-
-            await supabase
-              .from('tasks')
-              .update({
-                duration: maxSubtaskDuration,
-                end_date: newParentEndDate.toISOString().split('T')[0]
-              })
-              .eq('id', parentTask.id)
-          } else {
-            await supabase
-              .from('tasks')
-              .update({ duration: maxSubtaskDuration })
-              .eq('id', parentTask.id)
+                await supabase
+                  .from('tasks')
+                  .update({
+                    duration: maxSubtaskDuration,
+                    end_date: newParentEndDate.toISOString().split('T')[0]
+                  })
+                  .eq('id', parentTask.id)
+              } else {
+                await supabase
+                  .from('tasks')
+                  .update({ duration: maxSubtaskDuration })
+                  .eq('id', parentTask.id)
+              }
+            }
           }
         }
+
+        successCount++
+      } catch (error) {
+        logError(error, 'saveChange')
+        errors.push(`${change.taskName}: Erro ao salvar`)
+        errorCount++
       }
     }
-    // ========== FIM AJUSTE ==========
+
+    // Limpar mudanças pendentes
+    setPendingChanges(new Map())
 
     // Atualizar lista
-    showSuccessAlert('Alterações salvas com sucesso')
     onRefresh()
+
+    // Mostrar resultado
+    if (errorCount === 0) {
+      setToast({ message: `✓ ${successCount} alteração(ões) salva(s)`, type: 'success' })
+    } else {
+      setToast({
+        message: `⚠ ${successCount} salva(s), ${errorCount} com erro`,
+        type: 'error'
+      })
+      if (errors.length > 0) {
+        alert(`Alguns erros ocorreram:\n\n${errors.join('\n')}`)
+      }
+    }
   } catch (error) {
-    logError(error, 'updateCell')
+    logError(error, 'saveAllChanges')
+    setToast({ message: 'Erro ao salvar alterações', type: 'error' })
     showErrorAlert(error, ErrorContext.TASK_UPDATE)
+  } finally {
+    setIsLoading(false)
+    setLoadingMessage('')
   }
+}
+
+// Função para verificar se um campo tem mudança pendente
+function hasPendingChange(taskId: string, field: string): boolean {
+  return pendingChanges.has(`${taskId}-${field}`)
 }
 async function createNewTask() {
   if (!newTaskData.name.trim()) {
@@ -380,29 +479,40 @@ function cancelNewSubtask() {
   setNewSubtaskData({ name: '', duration: 1 })
   setAddingSubtaskToTask(null)
 }
-async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean) {
-  // Verificar se tem subtarefas
-  if (hasSubtasks) {
-    const confirmMsg = `A tarefa "${taskName}" possui subtarefas. Deseja excluir a tarefa e todas as suas subtarefas?`
-    if (!confirm(confirmMsg)) return
-  } else {
-    if (!confirm(`Tem certeza que deseja excluir a tarefa "${taskName}"?`)) return
-  }
+function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean) {
+  const message = hasSubtasks
+    ? `A tarefa "${taskName}" possui subtarefas.\n\nDeseja excluir a tarefa e todas as suas subtarefas?\n\nEsta ação não pode ser desfeita.`
+    : `Tem certeza que deseja excluir a tarefa "${taskName}"?\n\nEsta ação não pode ser desfeita.`
 
-  try {
-    const { error } = await supabase
-      .from('tasks')
-      .delete()
-      .eq('id', taskId)
+  setConfirmModal({
+    isOpen: true,
+    title: 'Confirmar Exclusão',
+    message,
+    variant: 'danger',
+    onConfirm: async () => {
+      try {
+        setIsLoading(true)
+        setLoadingMessage('Excluindo tarefa...')
 
-    if (error) throw error
+        const { error } = await supabase
+          .from('tasks')
+          .delete()
+          .eq('id', taskId)
 
-    showSuccessAlert('Tarefa excluída com sucesso')
-    onRefresh()
-  } catch (error) {
-    logError(error, 'deleteTask')
-    showErrorAlert(error, ErrorContext.TASK_DELETE)
-  }
+        if (error) throw error
+
+        setConfirmModal(null)
+        showSuccessAlert('Tarefa excluída com sucesso')
+        onRefresh()
+      } catch (error) {
+        logError(error, 'deleteTask')
+        showErrorAlert(error, ErrorContext.TASK_DELETE)
+      } finally {
+        setIsLoading(false)
+        setLoadingMessage('')
+      }
+    }
+  })
 }
 
   // Create task names map for modal
@@ -461,9 +571,11 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
               <input
                 type="text"
                 defaultValue={task.name}
-                className="flex-1 border-0 bg-transparent text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 rounded px-2 py-1"
+                className={`flex-1 border-0 bg-transparent text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 ${
+                  hasPendingChange(task.id, 'name') ? 'bg-yellow-50 border-2 border-yellow-400' : ''
+                }`}
                 onDoubleClick={(e) => e.currentTarget.select()}
-                onBlur={(e) => updateTask(task.id, 'name', e.target.value)}
+                onBlur={(e) => addPendingChange(task.id, 'name', e.target.value, task.name)}
               />
             </div>
           </td>
@@ -482,9 +594,13 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
               step="0.125"
               min="0.125"
               defaultValue={task.duration}
-              className="w-20 px-2 py-1 border border-gray-300 rounded text-center text-sm text-gray-900 bg-white"
+              className={`w-20 px-2 py-1 border rounded text-center text-sm text-gray-900 ${
+                hasPendingChange(task.id, 'duration')
+                  ? 'bg-yellow-50 border-yellow-400 border-2'
+                  : 'bg-white border-gray-300'
+              }`}
               onDoubleClick={(e) => e.currentTarget.select()}
-              onBlur={(e) => updateTask(task.id, 'duration', e.target.value)}
+              onBlur={(e) => addPendingChange(task.id, 'duration', e.target.value, task.duration)}
             />
           </td>
 
@@ -493,8 +609,12 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
             <input
               type="date"
               defaultValue={task.start_date || ''}
-              className="border border-gray-300 rounded px-2 py-1 text-sm text-gray-900 bg-white"
-              onBlur={(e) => updateTask(task.id, 'start_date', e.target.value)}
+              className={`border rounded px-2 py-1 text-sm text-gray-900 ${
+                hasPendingChange(task.id, 'start_date')
+                  ? 'bg-yellow-50 border-yellow-400 border-2'
+                  : 'bg-white border-gray-300'
+              }`}
+              onBlur={(e) => addPendingChange(task.id, 'start_date', e.target.value, task.start_date)}
             />
           </td>
 
@@ -503,8 +623,12 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
             <input
               type="date"
               defaultValue={task.end_date || ''}
-              className="border border-gray-300 rounded px-2 py-1 text-sm text-gray-900 bg-white"
-              onBlur={(e) => updateTask(task.id, 'end_date', e.target.value)}
+              className={`border rounded px-2 py-1 text-sm text-gray-900 ${
+                hasPendingChange(task.id, 'end_date')
+                  ? 'bg-yellow-50 border-yellow-400 border-2'
+                  : 'bg-white border-gray-300'
+              }`}
+              onBlur={(e) => addPendingChange(task.id, 'end_date', e.target.value, task.end_date)}
             />
           </td>
 
@@ -564,8 +688,12 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
                   min="0"
                   defaultValue={task.estimated_cost || ''}
                   placeholder="0,00"
-                  className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm text-gray-900 bg-white"
-                  onBlur={(e) => updateTask(task.id, 'estimated_cost', e.target.value)}
+                  className={`w-24 px-2 py-1 border rounded text-right text-sm text-gray-900 ${
+                    hasPendingChange(task.id, 'estimated_cost')
+                      ? 'bg-yellow-50 border-yellow-400 border-2'
+                      : 'bg-white border-gray-300'
+                  }`}
+                  onBlur={(e) => addPendingChange(task.id, 'estimated_cost', e.target.value, task.estimated_cost)}
                 />
               </div>
             )}
@@ -592,8 +720,12 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
                   min="0"
                   defaultValue={task.actual_cost || ''}
                   placeholder="0,00"
-                  className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm text-gray-900 bg-white"
-                  onBlur={(e) => updateTask(task.id, 'actual_cost', e.target.value)}
+                  className={`w-24 px-2 py-1 border rounded text-right text-sm text-gray-900 ${
+                    hasPendingChange(task.id, 'actual_cost')
+                      ? 'bg-yellow-50 border-yellow-400 border-2'
+                      : 'bg-white border-gray-300'
+                  }`}
+                  onBlur={(e) => addPendingChange(task.id, 'actual_cost', e.target.value, task.actual_cost)}
                 />
               </div>
             )}
@@ -698,7 +830,7 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
   }
 
   return (
-    <>
+    <TableViewErrorBoundary onRefresh={onRefresh}>
       {/* Recalculate Modal */}
       <RecalculateModal
         isOpen={showRecalculateModal}
@@ -716,14 +848,40 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
         }}
       />
 
-      <div className="bg-white rounded-lg border overflow-hidden">
-  <div className="p-6 border-b space-y-4">
-    <div>
-      <h2 className="text-lg font-semibold text-gray-900">Modo Planilha</h2>
-      <p className="text-sm text-gray-600">
-        Clique duplo para editar • Enter para salvar • Esc para cancelar
-      </p>
-    </div>
+      {/* Confirm Modal */}
+      {confirmModal && (
+        <ConfirmModal
+          isOpen={confirmModal.isOpen}
+          onClose={() => setConfirmModal(null)}
+          onConfirm={confirmModal.onConfirm}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          variant={confirmModal.variant}
+          isLoading={isLoading}
+          confirmText={confirmModal.variant === 'danger' ? 'Excluir' : 'Confirmar'}
+        />
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
+      <div className="bg-white rounded-lg border overflow-hidden relative">
+        {/* Loading Overlay */}
+        <LoadingOverlay isLoading={isLoading} message={loadingMessage} />
+
+        <div className="p-6 border-b space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Modo Planilha</h2>
+            <p className="text-sm text-gray-600">
+              Clique duplo para editar • Enter para salvar • Esc para cancelar
+            </p>
+          </div>
     
     {/* Barra de busca e filtros */}
     <div className="flex items-center gap-4">
@@ -771,55 +929,79 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
     </div>
   </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                WBS
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Tarefa
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Tipo
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Duração
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Início
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Fim
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Pessoas
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Progresso
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Custo Est.
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Custo Real
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-                Ações
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {/* Renderizar apenas tarefas de NÍVEL 1 (sem parent_id) usando recursão */}
-            {mainTasks.map(task => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                level={0}
-                allTasks={tasks}
-              />
-            ))}
+      {/* Empty State ou Tabela */}
+      {mainTasks.length === 0 && !isAddingTask ? (
+        <EmptyState
+          icon={
+            <svg className="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+          }
+          title={searchTerm ? "Nenhuma tarefa encontrada" : "Nenhuma tarefa cadastrada"}
+          description={
+            searchTerm
+              ? `Não encontramos tarefas correspondentes a "${searchTerm}". Tente ajustar sua busca.`
+              : "Comece criando sua primeira tarefa para gerenciar o projeto."
+          }
+          action={
+            searchTerm
+              ? undefined
+              : {
+                  label: "+ Criar Primeira Tarefa",
+                  onClick: () => setIsAddingTask(true)
+                }
+          }
+        />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  WBS
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Tarefa
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Tipo
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Duração
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Início
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Fim
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Pessoas
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Progresso
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Custo Est.
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Custo Real
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                  Ações
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {/* Renderizar apenas tarefas de NÍVEL 1 (sem parent_id) usando recursão */}
+              {mainTasks.map(task => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  level={0}
+                  allTasks={tasks}
+                />
+              ))}
 
             {/* Linha para adicionar nova tarefa principal */}
             {isAddingTask && (
@@ -893,12 +1075,14 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
                 </td>
               </tr>
             )}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Adicionar nova tarefa */}
-      <div className="p-4 border-t bg-gray-50">
+      {!searchTerm && (
+        <div className="p-4 border-t bg-gray-50">
   <button
     onClick={() => setIsAddingTask(true)}
     disabled={isAddingTask}
@@ -915,8 +1099,86 @@ async function deleteTask(taskId: string, taskName: string, hasSubtasks: boolean
       Enter para salvar • Esc para cancelar
     </span>
   )}
-</div>
+        </div>
+      )}
       </div>
-    </>
+
+      {/* Barra de Salvamento - Sticky Bottom */}
+      {pendingChanges.size > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-r from-yellow-50 to-orange-50 border-t-4 border-yellow-400 shadow-2xl z-50 animate-slide-up">
+          <div className="max-w-7xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              {/* Info das mudanças pendentes */}
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0 w-10 h-10 bg-yellow-400 rounded-full flex items-center justify-center">
+                  <svg className="w-6 h-6 text-yellow-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-bold text-yellow-900">
+                      {pendingChanges.size} alteração{pendingChanges.size !== 1 ? 'ões' : ''} não salva{pendingChanges.size !== 1 ? 's' : ''}
+                    </span>
+                    <span className="px-2 py-0.5 bg-yellow-400 text-yellow-900 rounded-full text-xs font-semibold">
+                      Pendente
+                    </span>
+                  </div>
+                  <p className="text-sm text-yellow-800 mt-0.5">
+                    Clique em &quot;Salvar Tudo&quot; para aplicar as mudanças ao banco de dados
+                  </p>
+                </div>
+              </div>
+
+              {/* Botões de ação */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setPendingChanges(new Map())}
+                  className="px-5 py-2.5 text-gray-700 bg-white border-2 border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 transition-all font-medium shadow-sm"
+                >
+                  Descartar Tudo
+                </button>
+                <button
+                  onClick={saveAllChanges}
+                  disabled={isLoading}
+                  className="px-8 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg hover:from-green-700 hover:to-green-800 transition-all font-bold text-lg shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isLoading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                      </svg>
+                      Salvar Tudo
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Adicionar animação slide-up */}
+      <style jsx>{`
+        @keyframes slide-up {
+          from {
+            transform: translateY(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        .animate-slide-up {
+          animation: slide-up 0.3s ease-out;
+        }
+      `}</style>
+    </TableViewErrorBoundary>
   )
 }

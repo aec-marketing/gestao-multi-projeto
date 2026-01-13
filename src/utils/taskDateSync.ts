@@ -77,8 +77,63 @@ export function calculateStartDateFromDuration(
 }
 
 /**
+ * Tipos de ajuste quando a duração é alterada
+ */
+export type DurationAdjustmentType = 'extend_end' | 'pull_start' | 'add_lag'
+
+/**
+ * Aplica ajuste de duração baseado no tipo escolhido pelo usuário
+ */
+export function applyDurationAdjustment(
+  newDuration: number,
+  adjustmentType: DurationAdjustmentType,
+  currentTask: {
+    start_date: string
+    end_date: string
+    duration: number
+    lag_days?: number
+  }
+): {
+  start_date?: string
+  end_date?: string
+  duration: number
+  lag_days?: number
+} {
+  const updates: any = { duration: newDuration }
+  const durationDiff = newDuration - currentTask.duration
+
+  switch (adjustmentType) {
+    case 'extend_end':
+      // Manter start_date, ajustar end_date
+      updates.start_date = currentTask.start_date
+      updates.end_date = calculateEndDateFromDuration(currentTask.start_date, newDuration)
+      updates.lag_days = 0 // Clear lag when dates change
+      break
+
+    case 'pull_start':
+      // Manter end_date, ajustar start_date
+      updates.end_date = currentTask.end_date
+      updates.start_date = calculateStartDateFromDuration(currentTask.end_date, newDuration)
+      updates.lag_days = 0 // Clear lag when dates change
+      break
+
+    case 'add_lag':
+      // Manter ambas as datas, adicionar diferença como lag
+      updates.start_date = currentTask.start_date
+      updates.end_date = currentTask.end_date
+      updates.lag_days = (currentTask.lag_days || 0) + durationDiff
+      break
+  }
+
+  return updates
+}
+
+/**
  * Sincroniza campos de tarefa quando uma data ou duração muda
  * Retorna objeto com campos atualizados para salvar no banco
+ *
+ * NOTA: Para mudanças de duração, esta função usa o comportamento padrão (extend_end).
+ * Para dar escolha ao usuário, use applyDurationAdjustment() com o modal
  */
 export function syncTaskFields(
   changedField: 'start_date' | 'end_date' | 'duration',
@@ -87,11 +142,13 @@ export function syncTaskFields(
     start_date?: string | null
     end_date?: string | null
     duration?: number
+    lag_days?: number
   }
 ): {
   start_date?: string
   end_date?: string
   duration?: number
+  lag_days?: number
 } {
   const updates: any = {}
 
@@ -106,12 +163,16 @@ export function syncTaskFields(
           newValue as string,
           currentTask.end_date
         )
+        // Clear lag when dates change
+        updates.lag_days = 0
       } else if (currentTask.duration) {
         // Tem duration - recalcular end_date
         updates.end_date = calculateEndDateFromDuration(
           newValue as string,
           currentTask.duration
         )
+        // Clear lag when dates change
+        updates.lag_days = 0
       }
       break
 
@@ -125,17 +186,22 @@ export function syncTaskFields(
           currentTask.start_date,
           newValue as string
         )
+        // Clear lag when dates change
+        updates.lag_days = 0
       } else if (currentTask.duration) {
         // Tem duration - recalcular start_date
         updates.start_date = calculateStartDateFromDuration(
           newValue as string,
           currentTask.duration
         )
+        // Clear lag when dates change
+        updates.lag_days = 0
       }
       break
 
     case 'duration':
-      // Mudou duration - recalcular end_date (preferencialmente)
+      // Mudou duration - comportamento padrão: extend_end
+      // Para dar escolha ao usuário, não use esta função diretamente
       updates.duration = newValue as number
 
       if (currentTask.start_date) {
@@ -144,12 +210,16 @@ export function syncTaskFields(
           currentTask.start_date,
           newValue as number
         )
+        // Clear lag when dates change
+        updates.lag_days = 0
       } else if (currentTask.end_date) {
         // Tem end_date - recalcular start_date
         updates.start_date = calculateStartDateFromDuration(
           currentTask.end_date,
           newValue as number
         )
+        // Clear lag when dates change
+        updates.lag_days = 0
       }
       break
   }
