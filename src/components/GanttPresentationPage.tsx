@@ -18,8 +18,8 @@ interface TaskWithDates {
   duration_days: number
   parent_id: string | null
   type?: string
-  wbs_code?: string
-  outline_level?: number
+  wbs_code?: string | null
+  outline_level?: number | null
 }
 
 export default function GanttPresentationPage({ projectId }: GanttPresentationPageProps) {
@@ -418,7 +418,7 @@ export default function GanttPresentationPage({ projectId }: GanttPresentationPa
                                 {monthName}
                               </div>
                               <div className="pl-0.5 text-[7px] text-gray-500">
-                                '{year}
+                                &apos;{year}
                               </div>
                             </div>
                           )

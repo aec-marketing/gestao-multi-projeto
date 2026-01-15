@@ -1423,6 +1423,10 @@ useEffect(() => {
               // Verificar se esta coluna está na área de buffer
               const isBufferColumn = date > maxDate
 
+              // Verificar se é fim de semana (0 = Domingo, 6 = Sábado)
+              const dayOfWeek = date.getDay()
+              const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+
               return (
                 <div
                   key={index}
@@ -1433,6 +1437,8 @@ useEffect(() => {
                       ? 'bg-blue-50 border-blue-300 border-r-2'
                       : isToday
                       ? 'bg-yellow-50 border-yellow-200'
+                      : isWeekend
+                      ? 'bg-gray-100 border-gray-200'
                       : 'border-gray-100'
                   }`}
                   style={{ width: `${columnWidth}px`, minWidth: `${columnWidth}px` }}
@@ -1751,6 +1757,10 @@ useEffect(() => {
                   // Verificar se esta coluna está na área de buffer
                   const isBufferColumn = date > maxDate
 
+                  // Verificar se é fim de semana (0 = Domingo, 6 = Sábado)
+                  const dayOfWeek = date.getDay()
+                  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+
                   // Ajustar espaçamento e fonte baseado no zoom
                   const padding = zoomLevel === 'month' ? 'px-0.5 py-1' : zoomLevel === 'day' ? 'px-4 py-2' : 'px-2 py-2'
                   const fontSize = zoomLevel === 'month' ? 'text-[9px]' : 'text-xs'
@@ -1765,6 +1775,8 @@ useEffect(() => {
                           ? 'bg-blue-100 border-blue-400 border-2'
                           : isToday
                           ? 'bg-yellow-50'
+                          : isWeekend
+                          ? 'bg-gray-200 border-gray-300'
                           : 'hover:bg-gray-100'
                       }`}
                       style={{ width: `${columnWidth}px`, minWidth: `${columnWidth}px` }}
@@ -1774,13 +1786,13 @@ useEffect(() => {
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric'
-                      })}${isToday ? ' (Hoje)' : ''}`}
+                      })}${isToday ? ' (Hoje)' : ''}${isWeekend ? ' (Fim de semana)' : ''}`}
                     >
-                      <div className={`${fontSize} font-medium ${isSelected ? 'text-blue-700' : 'text-gray-700'}`}>
+                      <div className={`${fontSize} font-medium ${isSelected ? 'text-blue-700' : isWeekend ? 'text-gray-600' : 'text-gray-700'}`}>
                         {date.getDate()}
                       </div>
                       {zoomLevel !== 'month' && (
-                        <div className={`${fontSize} ${isSelected ? 'text-blue-600' : 'text-gray-500'}`}>
+                        <div className={`${fontSize} ${isSelected ? 'text-blue-600' : isWeekend ? 'text-gray-500' : 'text-gray-500'}`}>
                           {date.toLocaleDateString('pt-BR', { month: 'short' })}
                         </div>
                       )}

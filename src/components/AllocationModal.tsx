@@ -193,7 +193,7 @@ export default function AllocationModal({
   // Líderes alocados na tarefa atual
   const allocatedLeaders = existingAllocations
     .map(a => allResources.find(r => r.id === a.resource_id))
-    .filter(r => r && (r.role === 'lider' || r.role === 'gerente'))
+    .filter(r => r && (r.hierarchy === 'lider' || r.hierarchy === 'gerente'))
     .filter(Boolean) as Resource[]
 
   // ✅ HERANÇA DE LÍDERES: Se esta é uma subtarefa, buscar líderes da tarefa pai
@@ -206,7 +206,7 @@ export default function AllocationModal({
     // Extrair líderes alocados na tarefa pai
     return parentAllocations
       .map(a => allResources.find(r => r.id === a.resource_id))
-      .filter(r => r && (r.role === 'lider' || r.role === 'gerente'))
+      .filter(r => r && (r.hierarchy === 'lider' || r.hierarchy === 'gerente'))
       .filter(Boolean) as Resource[]
   }, [task.parent_id, allAllocations, allResources])
 
@@ -221,15 +221,15 @@ export default function AllocationModal({
   const allocatedLeaderIds = allEffectiveLeaders.map(l => l.id)
 
   // Líderes disponíveis (não alocados ainda)
-  const availableLeaders = allResources.filter(r => 
-    (r.role === 'lider' || r.role === 'gerente') && 
+  const availableLeaders = allResources.filter(r =>
+    (r.hierarchy === 'lider' || r.hierarchy === 'gerente') &&
     !allocatedResourceIds.includes(r.id)
   )
 
   // Operadores dos líderes alocados
-  const operatorsOfAllocatedLeaders = allResources.filter(r => 
-    r.role === 'operador' && 
-    r.leader_id && 
+  const operatorsOfAllocatedLeaders = allResources.filter(r =>
+    r.hierarchy === 'operador' &&
+    r.leader_id &&
     allocatedLeaderIds.includes(r.leader_id) &&
     !allocatedResourceIds.includes(r.id)
   )
@@ -297,9 +297,10 @@ export default function AllocationModal({
                           <div className="flex-1">
                             <p className="font-medium text-gray-900">{resource.name}</p>
                             <p className="text-xs text-gray-500">
-                              {resource.role === 'gerente' ? '👔 Gerente' : 
-                               resource.role === 'lider' ? '👨‍💼 Líder' : 
+                              {resource.hierarchy === 'gerente' ? '👔 Gerente' :
+                               resource.hierarchy === 'lider' ? '👨‍💼 Líder' :
                                '👷 Operador'}
+                              {resource.role && ` - ${resource.role}`}
                             </p>
                           </div>
                           <span className={`px-2 py-1 text-xs rounded-full ${PRIORITY_CONFIG[allocation.priority].color}`}>
@@ -401,7 +402,7 @@ export default function AllocationModal({
                           <option value="">Escolha um líder...</option>
                           {availableLeaders.map(resource => (
                             <option key={resource.id} value={resource.id}>
-                              {resource.name} {resource.role === 'gerente' ? '(Gerente)' : '(Líder)'}
+                              {resource.name} {resource.hierarchy === 'gerente' ? '(Gerente)' : '(Líder)'}{resource.role ? ` - ${resource.role}` : ''}
                             </option>
                           ))}
                         </select>

@@ -1,4 +1,5 @@
 import { Task } from '@/types/database.types'
+import { parseLocalDate, formatLocalDate } from './taskDateSync'
 
 interface Predecessor {
   id: string
@@ -30,14 +31,13 @@ export function calculateTaskDateFromPredecessor(
     throw new Error('Predecessor must have a start_date')
   }
 
-  // Parse seguro de datas para evitar problemas de timezone
-  const parseDate = (dateStr: string) => {
-    const parts = dateStr.split('T')[0].split('-')
-    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
-  }
+  // Usar função centralizada de parse
+  const predStart = parseLocalDate(predecessor.start_date)
+  const predEnd = parseLocalDate(predecessor.end_date || predecessor.start_date)
 
-  const predStart = parseDate(predecessor.start_date)
-  const predEnd = parseDate(predecessor.end_date || predecessor.start_date)
+  if (!predStart || !predEnd) {
+    throw new Error('Invalid predecessor dates')
+  }
   const lagDays = predecessorRelation.lag_time || 0
   const taskDuration = task.duration || 1
 
@@ -135,16 +135,16 @@ export function recalculateTasksInCascade(
 
       updates.push({
         id: dependentTask.id,
-        start_date: newDates.start_date.toISOString().split('T')[0],
-        end_date: newDates.end_date.toISOString().split('T')[0],
+        start_date: formatLocalDate(newDates.start_date),
+        end_date: formatLocalDate(newDates.end_date),
         reason: hasOldDate
           ? `Predecessor "${predecessorTask.name}" foi alterado`
           : `Data calculada baseada no predecessor "${predecessorTask.name}"`
       })
 
       // Atualiza a tarefa no array para próximas iterações
-      dependentTask.start_date = newDates.start_date.toISOString().split('T')[0]
-      dependentTask.end_date = newDates.end_date.toISOString().split('T')[0]
+      dependentTask.start_date = formatLocalDate(newDates.start_date)
+      dependentTask.end_date = formatLocalDate(newDates.end_date)
 
       // Adiciona à fila para propagar mudança
       queue.push(dependentTask.id)
@@ -300,18 +300,11 @@ export function auditPredecessorConflicts(
           pred
         )
 
-        // Parse seguro de datas para evitar problemas de timezone
-        const parseDate = (dateStr: string) => {
-          const parts = dateStr.split('T')[0].split('-')
-          return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
-        }
-
-        const currentStartDate = parseDate(task.start_date)
+        // Usar função centralizada de parse
+        const currentStartDate = parseLocalDate(task.start_date)
         const calculatedStartDate = calculatedDates.start_date
 
-        // Normalizar para meia-noite para comparação precisa
-        currentStartDate.setHours(0, 0, 0, 0)
-        calculatedStartDate.setHours(0, 0, 0, 0)
+        if (!currentStartDate) continue
 
         const currentStartTime = currentStartDate.getTime()
         const calculatedStartTime = calculatedStartDate.getTime()
@@ -325,17 +318,17 @@ export function auditPredecessorConflicts(
 
           if (existingUpdate) {
             // Se já existe, usar a data mais restritiva (mais tarde)
-            const existingTime = new Date(existingUpdate.start_date).getTime()
+            const existingTime = parseLocalDate(existingUpdate.start_date)?.getTime() || 0
             if (calculatedStartTime > existingTime) {
-              existingUpdate.start_date = calculatedDates.start_date.toISOString().split('T')[0]
-              existingUpdate.end_date = calculatedDates.end_date.toISOString().split('T')[0]
+              existingUpdate.start_date = formatLocalDate(calculatedDates.start_date)
+              existingUpdate.end_date = formatLocalDate(calculatedDates.end_date)
               existingUpdate.reason = `Conflito com predecessor "${predecessorTask.name}" (deve começar ${daysDiff} dia(s) mais tarde)`
             }
           } else {
             conflicts.push({
               id: task.id,
-              start_date: calculatedDates.start_date.toISOString().split('T')[0],
-              end_date: calculatedDates.end_date.toISOString().split('T')[0],
+              start_date: formatLocalDate(calculatedDates.start_date),
+              end_date: formatLocalDate(calculatedDates.end_date),
               reason: `Conflito com predecessor "${predecessorTask.name}" (deve começar ${daysDiff} dia(s) mais tarde)`
             })
           }

@@ -68,9 +68,9 @@ export default function Dashboard() {
     totalProjects: projects.length,
     activeProjects: projects.filter(p => p.is_active).length,
     totalResources: resources.length,
-    managers: resources.filter(r => r.role === 'gerente').length,
-    leaders: resources.filter(r => r.role === 'lider').length,
-    operators: resources.filter(r => r.role === 'operador').length
+    managers: resources.filter(r => r.hierarchy === 'gerente').length,
+    leaders: resources.filter(r => r.hierarchy === 'lider').length,
+    operators: resources.filter(r => r.hierarchy === 'operador').length
   }
 
   if (isLoading) {

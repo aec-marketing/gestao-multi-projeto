@@ -113,11 +113,11 @@ export default function ConnectionTest() {
                 <div className="flex justify-between items-center">
                   <div className="font-medium text-gray-900">{resource.name}</div>
                   <span className={`px-2 py-1 text-xs rounded ${
-                    resource.role === 'gerente' ? 'bg-purple-100 text-purple-800' :
-                    resource.role === 'lider' ? 'bg-blue-100 text-blue-800' :
+                    resource.hierarchy === 'gerente' ? 'bg-purple-100 text-purple-800' :
+                    resource.hierarchy === 'lider' ? 'bg-blue-100 text-blue-800' :
                     'bg-green-100 text-green-800'
                   }`}>
-                    {resource.role}
+                    {resource.hierarchy}{resource.role ? ` - ${resource.role}` : ''}
                   </span>
                 </div>
                 {resource.email && (

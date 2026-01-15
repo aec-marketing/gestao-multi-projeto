@@ -6,18 +6,57 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24
 
 /**
  * Parse seguro de data string para evitar problemas de timezone
+ *
+ * Esta função garante que:
+ * 1. A data é interpretada no timezone local (não UTC)
+ * 2. Não há conversão automática de timezone
+ * 3. A data representa exatamente o dia especificado
+ *
+ * Formato esperado: YYYY-MM-DD ou YYYY-MM-DDTHH:MM:SS
+ *
+ * @param dateStr String no formato ISO (YYYY-MM-DD)
+ * @returns Date object no timezone local ou null se inválido
  */
-export function parseLocalDate(dateStr: string | null): Date | null {
+export function parseLocalDate(dateStr: string | null | undefined): Date | null {
   if (!dateStr) return null
 
-  const parts = dateStr.split('T')[0].split('-')
+  // Remover parte de hora se existir
+  const datePart = dateStr.split('T')[0]
+  const parts = datePart.split('-')
+
   if (parts.length !== 3) return null
 
-  return new Date(
-    parseInt(parts[0]),
-    parseInt(parts[1]) - 1,
-    parseInt(parts[2])
-  )
+  const year = parseInt(parts[0], 10)
+  const month = parseInt(parts[1], 10) - 1 // Mês é 0-indexed
+  const day = parseInt(parts[2], 10)
+
+  // Validar valores
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null
+  if (month < 0 || month > 11) return null
+  if (day < 1 || day > 31) return null
+
+  // Criar data no timezone local (não UTC)
+  const date = new Date(year, month, day)
+
+  // Normalizar para meia-noite
+  date.setHours(0, 0, 0, 0)
+
+  return date
+}
+
+/**
+ * Formata Date object para string YYYY-MM-DD
+ * Garante que a data é formatada no timezone local
+ *
+ * @param date Date object
+ * @returns String no formato YYYY-MM-DD
+ */
+export function formatLocalDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
 }
 
 /**

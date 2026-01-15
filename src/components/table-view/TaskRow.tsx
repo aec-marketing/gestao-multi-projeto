@@ -3,6 +3,7 @@ import { Task, Resource } from '@/types/database.types'
 import { Allocation } from '@/types/allocation.types'
 import { TaskEditCell } from './TaskEditCell'
 import { TaskActionsMenu } from './TaskActionsMenu'
+import { NewSubtaskRow } from './NewSubtaskRow'
 import { formatTaskType, getTaskColorClass } from './utils'
 
 interface TaskRowProps {
@@ -17,6 +18,14 @@ interface TaskRowProps {
   onAddSubtask: (taskId: string) => void
   onDelete: (taskId: string, taskName: string, hasSubtasks: boolean) => void
   calculateTotalCost: (taskId: string, field: 'estimated_cost' | 'actual_cost') => number
+  // Subtask creation
+  addingSubtaskTo: string | null
+  newSubtaskData: { name: string; duration: number }
+  onSubtaskNameChange: (value: string) => void
+  onSubtaskDurationChange: (value: number) => void
+  onSaveSubtask: (parentId: string) => void
+  onCancelSubtask: () => void
+  isSavingSubtask: boolean
 }
 
 /**
@@ -34,7 +43,14 @@ export const TaskRow = React.memo(function TaskRow({
   onFieldChange,
   onAddSubtask,
   onDelete,
-  calculateTotalCost
+  calculateTotalCost,
+  addingSubtaskTo,
+  newSubtaskData,
+  onSubtaskNameChange,
+  onSubtaskDurationChange,
+  onSaveSubtask,
+  onCancelSubtask,
+  isSavingSubtask
 }: TaskRowProps) {
   // Subtasks
   const subtasks = useMemo(
@@ -234,6 +250,20 @@ export const TaskRow = React.memo(function TaskRow({
         </td>
       </tr>
 
+      {/* Linha de nova subtarefa (se estiver adicionando) */}
+      {addingSubtaskTo === task.id && (
+        <NewSubtaskRow
+          name={newSubtaskData.name}
+          duration={newSubtaskData.duration}
+          parentLevel={level}
+          onNameChange={onSubtaskNameChange}
+          onDurationChange={onSubtaskDurationChange}
+          onSave={() => onSaveSubtask(task.id)}
+          onCancel={onCancelSubtask}
+          isSaving={isSavingSubtask}
+        />
+      )}
+
       {/* Renderização recursiva das subtarefas */}
       {subtasks.map(subtask => (
         <TaskRow
@@ -249,6 +279,13 @@ export const TaskRow = React.memo(function TaskRow({
           onAddSubtask={onAddSubtask}
           onDelete={onDelete}
           calculateTotalCost={calculateTotalCost}
+          addingSubtaskTo={addingSubtaskTo}
+          newSubtaskData={newSubtaskData}
+          onSubtaskNameChange={onSubtaskNameChange}
+          onSubtaskDurationChange={onSubtaskDurationChange}
+          onSaveSubtask={onSaveSubtask}
+          onCancelSubtask={onCancelSubtask}
+          isSavingSubtask={isSavingSubtask}
         />
       ))}
     </>

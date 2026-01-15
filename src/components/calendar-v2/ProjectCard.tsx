@@ -23,6 +23,9 @@ export default function ProjectCard({
   dateRange,
   onProjectClick,
 }: ProjectCardProps) {
+  // Get client name from first event (all events in same project have same client)
+  const clientName = events.length > 0 ? events[0].clientName : null
+
   // Get unique team members working on this project
   const teamMembers = useMemo(() => {
     const uniqueMembers = new Map<string, { name: string; taskCount: number }>()
@@ -112,6 +115,12 @@ export default function ProjectCard({
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
+          {/* Client name (if available) */}
+          {clientName && (
+            <div className="flex items-center gap-1 mb-1">
+              <span className="text-xs text-gray-500">🏢 {clientName}</span>
+            </div>
+          )}
           <h3 className="font-bold text-lg text-gray-900 truncate">
             {projectCode}
           </h3>

@@ -19,8 +19,8 @@ interface TaskWithDates {
   duration_days: number
   parent_id: string | null
   type?: string
-  wbs_code?: string
-  outline_level?: number
+  wbs_code?: string | null
+  outline_level?: number | null
 }
 
 export default function GanttPresentationModal({
@@ -29,8 +29,6 @@ export default function GanttPresentationModal({
   project,
   tasks
 }: GanttPresentationModalProps) {
-  if (!isOpen) return null
-
   // Calcular datas das tarefas mantendo hierarquia
   const tasksWithDates: TaskWithDates[] = React.useMemo(() => {
     if (!project?.start_date) return []
@@ -141,6 +139,9 @@ export default function GanttPresentationModal({
   // Calcular número de páginas necessárias
   const tasksPerPage = 25 // Tarefas que cabem em uma página A4 otimizada
   const totalPages = Math.ceil(tasksWithDates.length / tasksPerPage)
+
+  // Early return after all hooks
+  if (!isOpen) return null
 
   // Função para imprimir
   const handlePrint = () => {
@@ -345,7 +346,7 @@ export default function GanttPresentationModal({
                                   {monthName}
                                 </div>
                                 <div className="pl-1 text-[8px] text-gray-500">
-                                  '{year}
+                                  &apos;{year}
                                 </div>
                               </div>
                             )
@@ -563,7 +564,7 @@ export default function GanttPresentationModal({
                                 {monthName}
                               </div>
                               <div className="pl-0.5 text-[7px] text-gray-500">
-                                '{year}
+                                &apos;{year}
                               </div>
                             </div>
                           )

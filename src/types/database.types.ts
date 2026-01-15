@@ -18,12 +18,8 @@ export type Database = {
           target_end_date: string | null  // Data alvo/limite do projeto
           is_active: boolean
           notes: string | null
-              estimated_cost: number        // ← ADICIONE
-    actual_cost: number           // ← ADICIONE
-              outline_level: number        // Nível hierárquico (1, 2, 3...)
-          wbs_code: string | null      // Código WBS (1, 1.1, 1.1.1)
-          is_summary: boolean          // É tarefa sumária?
-
+          client_name: string | null      // Nome do cliente
+          client_logo_url: string | null  // URL da logo do cliente
           created_at: string
           updated_at: string
         }
@@ -42,11 +38,8 @@ export type Database = {
           target_end_date?: string | null
           is_active?: boolean
           notes?: string | null
-          estimated_cost?: number
-          actual_cost?: number
-          outline_level?: number
-          wbs_code?: string | null
-          is_summary?: boolean
+          client_name?: string | null
+          client_logo_url?: string | null
         }
         Update: {
           id?: string
@@ -63,8 +56,8 @@ export type Database = {
           target_end_date?: string | null  // Data alvo/limite do projeto
           is_active?: boolean
           notes?: string | null
-              estimated_cost?: number       // ← ADICIONE
-    actual_cost?: number          // ← ADICIONE
+          client_name?: string | null
+          client_logo_url?: string | null
         }
       }
       resources: {
@@ -72,7 +65,8 @@ export type Database = {
           id: string
           name: string
           email: string | null
-          role: 'gerente' | 'lider' | 'operador'
+          hierarchy: 'gerente' | 'lider' | 'operador'  // Hierarquia funcional (fixa)
+          role: string | null  // Função/especialidade - texto livre (visual)
           leader_id: string | null
           is_active: boolean
           created_at: string
@@ -82,7 +76,8 @@ export type Database = {
           id?: string
           name: string
           email?: string | null
-          role: 'gerente' | 'lider' | 'operador'
+          hierarchy: 'gerente' | 'lider' | 'operador'
+          role?: string | null
           leader_id?: string | null
           is_active?: boolean
         }
@@ -90,7 +85,8 @@ export type Database = {
           id?: string
           name?: string
           email?: string | null
-          role?: 'gerente' | 'lider' | 'operador'
+          hierarchy?: 'gerente' | 'lider' | 'operador'
+          role?: string | null
           leader_id?: string | null
           is_active?: boolean
         }

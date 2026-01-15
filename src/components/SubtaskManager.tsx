@@ -109,7 +109,7 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
 
       // Filtrar apenas líderes e gerentes
       const leaderAllocations = parentAllocations?.filter(
-        a => a.resource && (a.resource.role === 'lider' || a.resource.role === 'gerente')
+        a => a.resource && (a.resource.hierarchy === 'lider' || a.resource.hierarchy === 'gerente')
       ) || []
 
       // Copiar alocações de líderes para a subtarefa

@@ -25,7 +25,7 @@ export function useCalendarData(
   const { allocations, isLoading: allocationsLoading } = useAllocations()
   const { personalEvents, isLoading: eventsLoading } = usePersonalEvents()
 
-  // 1. Group resources by role
+  // 1. Group resources by hierarchy (not role - role is for visual function/specialty)
   const groupedResources = useMemo((): GroupedResources => {
     let filtered = resources
 
@@ -34,19 +34,36 @@ export function useCalendarData(
       filtered = filtered.filter(r => r.id === filters.selectedResource)
     }
 
-    // Filter by visible role groups
+    // 🎯 SMART FILTER: If a project is selected, show only resources allocated to that project
+    if (filters.selectedProject) {
+      // Get unique resource IDs from allocations of the selected project
+      const allocatedResourceIds = new Set(
+        allocations
+          .filter(alloc => {
+            const allocWithDetails = alloc as AllocationWithDetails
+            return allocWithDetails.task?.project?.code === filters.selectedProject
+          })
+          .map(alloc => alloc.resource_id)
+      )
+
+      // Filter resources to only those allocated to the project
+      filtered = filtered.filter(r => allocatedResourceIds.has(r.id))
+    }
+
+    // Filter by visible hierarchy groups
     filtered = filtered.filter(r => {
-      if (r.role === 'gerente') return filters.selectedRoleGroups.has('gerente')
-      if (r.role === 'lider') return filters.selectedRoleGroups.has('lider')
-      return filters.selectedRoleGroups.has('operador')
+      if (r.hierarchy === 'gerente') return filters.selectedRoleGroups.has('gerente')
+      if (r.hierarchy === 'lider') return filters.selectedRoleGroups.has('lider')
+      if (r.hierarchy === 'operador') return filters.selectedRoleGroups.has('operador')
+      return false
     })
 
     return {
-      gerente: filtered.filter(r => r.role === 'gerente'),
-      lider: filtered.filter(r => r.role === 'lider'),
-      operador: filtered.filter(r => r.role === 'operador'),
+      gerente: filtered.filter(r => r.hierarchy === 'gerente'),
+      lider: filtered.filter(r => r.hierarchy === 'lider'),
+      operador: filtered.filter(r => r.hierarchy === 'operador'),
     }
-  }, [resources, filters.selectedResource, filters.selectedRoleGroups])
+  }, [resources, allocations, filters.selectedResource, filters.selectedProject, filters.selectedRoleGroups])
 
   // 2. Filter allocations by date range and project
   const filteredAllocations = useMemo(() => {
@@ -96,6 +113,7 @@ export function useCalendarData(
         projectId: allocWithDetails.task?.project?.id || '',
         projectName: allocWithDetails.task?.project?.name || 'Sem projeto',
         projectCode: allocWithDetails.task?.project?.code || 'N/A',
+        clientName: allocWithDetails.task?.project?.client_name || null,
         taskId: alloc.task_id,
         taskType: allocWithDetails.task?.type,
       }

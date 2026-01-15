@@ -62,6 +62,13 @@ export default function TaskDetailModal({
         <div className="px-6 py-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
           <div className="flex items-start justify-between">
             <div className="flex-1">
+              {/* Cliente (se disponível) */}
+              {tasks.length > 0 && tasks[0].clientName && (
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm text-gray-600">🏢 {tasks[0].clientName}</span>
+                </div>
+              )}
+
               <div className="flex items-center space-x-2 mb-1">
                 <span className="text-sm font-semibold text-blue-600 bg-blue-100 px-2 py-1 rounded">
                   {projectCode}

@@ -11,7 +11,7 @@ import { parseLocalDate } from '@/utils/date.utils'
 import { PROJECT_COLORS } from './TimelineTaskBar'
 
 interface TimelineResourceRowProps {
-  resource: { id: string; name: string; role: string }
+  resource: { id: string; name: string; hierarchy: string; role: string | null }
   dateRange: Date[]
   events: CalendarEvent[]
   personalEvents: PersonalEvent[]
@@ -117,16 +117,38 @@ export default function TimelineResourceRow({
     return eventsOnDay.length >= 3
   }
 
-  // Role badge color
-  const getRoleBadge = (role: string) => {
-    switch (role) {
+  // Badge color based on hierarchy (not role)
+  const getHierarchyBadgeColor = (hierarchy: string) => {
+    switch (hierarchy) {
       case 'gerente':
         return 'bg-purple-100 text-purple-800'
       case 'lider':
         return 'bg-blue-100 text-blue-800'
+      case 'operador':
+        return 'bg-gray-100 text-gray-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
+  }
+
+  // Display label: hierarchy icon + custom role (if exists)
+  const getDisplayLabel = (hierarchy: string, role: string | null) => {
+    // Get hierarchy icon
+    let icon = '👤'
+    if (hierarchy === 'gerente') icon = '👔'
+    else if (hierarchy === 'lider') icon = '👨‍💼'
+    else if (hierarchy === 'operador') icon = '👷'
+
+    // If has custom role/function, show it
+    if (role) {
+      return `${icon} ${role}`
+    }
+
+    // Otherwise show hierarchy name
+    if (hierarchy === 'gerente') return `${icon} Gerente`
+    if (hierarchy === 'lider') return `${icon} Líder`
+    if (hierarchy === 'operador') return `${icon} Operador`
+    return `${icon} Sem função`
   }
 
   return (
@@ -136,8 +158,8 @@ export default function TimelineResourceRow({
         <div className="font-semibold text-sm text-gray-900 truncate">
           {resource.name}
         </div>
-        <div className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium ${getRoleBadge(resource.role)}`}>
-          {resource.role === 'gerente' ? '👔 Gerente' : resource.role === 'lider' ? '👨‍💼 Líder' : '👷 Operador'}
+        <div className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium ${getHierarchyBadgeColor(resource.hierarchy)}`}>
+          {getDisplayLabel(resource.hierarchy, resource.role)}
         </div>
       </div>
 

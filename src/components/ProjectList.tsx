@@ -7,6 +7,7 @@ import { formatDateBR } from '@/utils/date.utils'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
+import ProjectEditModal from './ProjectEditModal'
 
 /**
  * Props for ProjectList component
@@ -43,6 +44,7 @@ interface ProjectListProps {
 export default function ProjectList({ projects, resources, onRefresh }: ProjectListProps) {
   const [selectedProjectForGantt, setSelectedProjectForGantt] = useState<string | null>(null)
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
 
   // Função para excluir projeto (com CASCADE automático no Supabase)
   async function deleteProject(projectId: string, projectName: string) {
@@ -172,6 +174,22 @@ export default function ProjectList({ projects, resources, onRefresh }: ProjectL
           <div key={project.id} className="bg-white rounded-lg border hover:shadow-md transition-shadow p-6">
             <div className="flex items-start justify-between mb-4">
               <div className="flex-1">
+                {/* Cliente (Logo + Nome) */}
+                {project.client_name && (
+                  <div className="flex items-center gap-2 mb-3">
+                    {project.client_logo_url && (
+                      <img
+                        src={project.client_logo_url}
+                        alt={project.client_name}
+                        className="w-8 h-8 object-contain rounded border border-gray-300 bg-white p-1"
+                      />
+                    )}
+                    <span className="text-sm font-medium text-gray-600">
+                      🏢 {project.client_name}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex items-center space-x-3 mb-2">
                   <h3 className="text-lg font-semibold text-gray-900">{project.name}</h3>
                   <span className="text-sm font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded">
@@ -225,7 +243,10 @@ export default function ProjectList({ projects, resources, onRefresh }: ProjectL
                   </button>
                 </Link>
 
-                <button className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors">
+                <button
+                  onClick={() => setEditingProject(project)}
+                  className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
+                >
                   ✏️ Editar
                 </button>
 
@@ -256,9 +277,22 @@ export default function ProjectList({ projects, resources, onRefresh }: ProjectL
 
       {/* Modal do Gantt */}
       {selectedProjectForGantt && (
-        <GanttView 
+        <GanttView
           projectId={selectedProjectForGantt}
           onClose={() => setSelectedProjectForGantt(null)}
+        />
+      )}
+
+      {/* Modal de Edição */}
+      {editingProject && (
+        <ProjectEditModal
+          project={editingProject}
+          resources={resources}
+          onClose={() => setEditingProject(null)}
+          onSave={() => {
+            showSuccessAlert('Projeto atualizado com sucesso!')
+            onRefresh?.()
+          }}
         />
       )}
     </>

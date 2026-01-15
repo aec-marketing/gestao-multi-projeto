@@ -50,22 +50,29 @@ export default function TimelineTaskBar({
         border ${priorityBorder}
         px-2 py-1 text-[10px] rounded cursor-pointer
         hover:opacity-90 hover:shadow-md transition-all
-        flex items-center justify-between
+        flex flex-col gap-0.5
         pointer-events-auto
       `}
       style={style}
       title={tooltip}
       onClick={onClick}
     >
-      {/* Project code */}
-      <div className="font-bold truncate flex-1">
-        {bar.projectCode}
+      {/* Project code and task count */}
+      <div className="flex items-center justify-between">
+        <div className="font-bold truncate flex-1">
+          {bar.projectCode}
+        </div>
+        {bar.tasks.length > 1 && (
+          <div className="text-[9px] opacity-90 ml-1 whitespace-nowrap bg-white bg-opacity-50 px-1 rounded">
+            {bar.tasks.length}x
+          </div>
+        )}
       </div>
 
-      {/* Task count badge */}
-      {bar.tasks.length > 1 && (
-        <div className="text-[9px] opacity-90 ml-1 whitespace-nowrap bg-white bg-opacity-50 px-1 rounded">
-          {bar.tasks.length}x
+      {/* Client name (if available) */}
+      {bar.clientName && (
+        <div className="text-[9px] opacity-75 truncate">
+          🏢 {bar.clientName}
         </div>
       )}
     </div>

@@ -8,6 +8,8 @@ interface ImportMetadata {
   category: string
   leaderId: string | null
   vendorName: string
+  clientName?: string | null
+  clientLogoUrl?: string | null
 }
 
 interface ImportResult {
@@ -84,6 +86,8 @@ export async function importMSProject(
         category: metadata.category,
         vendor_name: metadata.vendorName,
         leader_id: metadata.leaderId,
+        client_name: metadata.clientName || null,
+        client_logo_url: metadata.clientLogoUrl || null,
         start_date: projectInfo.startDate.toISOString(),
         end_date: projectInfo.endDate.toISOString(),
         is_active: true,
@@ -138,7 +142,7 @@ export async function importMSProject(
           is_optional: false,
           is_critical_path: task.isCritical,
           sort_order: task.uid,
-          outline_level: task.outlineLevel,
+          outline_level: Math.max(0, task.outlineLevel - 1), // MS Project usa 1-indexed, nós usamos 0-indexed
           wbs_code: task.outlineNumber,
           is_summary: task.isSummary,
           estimated_cost: 0,

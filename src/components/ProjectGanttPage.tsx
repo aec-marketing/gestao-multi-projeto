@@ -153,6 +153,26 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
                 ← Voltar
               </a>
               <div className="border-l h-6"></div>
+
+              {/* Logo e Nome do Cliente */}
+              {project.client_name && (
+                <>
+                  <div className="flex items-center gap-2">
+                    {project.client_logo_url && (
+                      <img
+                        src={project.client_logo_url}
+                        alt={project.client_name}
+                        className="w-10 h-10 object-contain rounded border border-gray-300 bg-white p-1"
+                      />
+                    )}
+                    <span className="text-lg font-semibold text-gray-700">
+                      {project.client_name}
+                    </span>
+                  </div>
+                  <div className="text-gray-400 text-2xl">|</div>
+                </>
+              )}
+
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">
                   {project.name}

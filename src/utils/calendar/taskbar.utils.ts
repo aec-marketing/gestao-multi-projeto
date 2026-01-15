@@ -9,6 +9,7 @@ export interface TaskBar {
   projectCode: string
   projectName: string
   projectId: string
+  clientName?: string | null
   startDay: number // Index in dateRange array
   endDay: number // Index in dateRange array (inclusive)
   priority: 'alta' | 'media' | 'baixa'
@@ -85,6 +86,7 @@ export function mergeConsecutiveProjectBars(
           projectCode: event.projectCode,
           projectName: event.projectName,
           projectId: event.projectId,
+          clientName: event.clientName || null,
           startDay: partialStartDay,
           endDay: partialEndDay,
           priority: event.priority,
@@ -124,6 +126,7 @@ export function mergeConsecutiveProjectBars(
         projectCode: event.projectCode,
         projectName: event.projectName,
         projectId: event.projectId,
+        clientName: event.clientName || null,
         startDay,
         endDay,
         priority: event.priority,

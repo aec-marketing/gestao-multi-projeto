@@ -12,6 +12,7 @@ export interface CalendarEvent {
   projectId: string
   projectName: string
   projectCode: string
+  clientName?: string | null
   taskId?: string
   taskType?: string
 }

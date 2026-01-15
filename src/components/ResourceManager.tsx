@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { Resource } from '@/types/database.types'
 import { PRIORITY_CONFIG } from '@/types/allocation.types'
 import { formatDateBR } from '@/utils/date.utils'
@@ -29,12 +29,12 @@ export default function ResourceManager({ onClose }: ResourceManagerProps) {
     return counts
   }, [allocations])
 
-  // Group resources by role
+  // Group resources by hierarchy (not role - role is for custom function)
   const groupedResources = useMemo(() => {
     const groups = {
-      gerente: resources.filter(r => r.role === 'gerente'),
-      lider: resources.filter(r => r.role === 'lider'),
-      operador: resources.filter(r => r.role === 'operador')
+      gerente: resources.filter(r => r.hierarchy === 'gerente'),
+      lider: resources.filter(r => r.hierarchy === 'lider'),
+      operador: resources.filter(r => r.hierarchy === 'operador'),
     }
     return groups
   }, [resources])
@@ -142,11 +142,12 @@ export default function ResourceManager({ onClose }: ResourceManagerProps) {
                   </div>
                 </div>
               )}
+
             </div>
           </div>
 
           {/* Right Panel - Resource Details (Independent Scroll) */}
-          <div className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col overflow-hidden">
             {selectedResourceId ? (
               <ResourceDetailsPanel
                 resourceId={selectedResourceId}
@@ -186,16 +187,26 @@ function ResourceCard({
   isSelected: boolean
   onClick: () => void
 }) {
-  const roleIcons = {
+  const roleIcons: Record<string, string> = {
     gerente: '👔',
     lider: '👨‍💼',
     operador: '👷'
   }
 
-  const roleColors = {
+  const roleColors: Record<string, string> = {
     gerente: 'text-purple-600',
     lider: 'text-blue-600',
     operador: 'text-green-600'
+  }
+
+  // Get hierarchy icon (based on hierarchy, not role)
+  const getHierarchyIcon = (hierarchy: string) => {
+    return roleIcons[hierarchy] || '👤'
+  }
+
+  // Get hierarchy color (based on hierarchy, not role)
+  const getHierarchyColor = (hierarchy: string) => {
+    return roleColors[hierarchy] || 'text-gray-600'
   }
 
   return (
@@ -208,15 +219,15 @@ function ResourceCard({
       }`}
     >
       <div className="flex items-center gap-3">
-        <div className={`text-2xl ${roleColors[resource.role]}`}>
-          {roleIcons[resource.role]}
+        <div className={`text-2xl ${getHierarchyColor(resource.hierarchy)}`}>
+          {getHierarchyIcon(resource.hierarchy)}
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-medium text-gray-900 truncate">
             {resource.name}
           </div>
           <div className="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
-            <span className="capitalize">{resource.role}</span>
+            <span className="capitalize">{resource.role || `${resource.hierarchy === 'gerente' ? 'Gerente' : resource.hierarchy === 'lider' ? 'Líder' : 'Operador'}`}</span>
             {allocationCount > 0 && (
               <>
                 <span>•</span>
@@ -253,26 +264,93 @@ function ResourceDetailsPanel({
   const resourceAllocations = allocations.filter(a => a.resource_id === resourceId)
   const resourceEvents = personalEvents.filter(e => e.resource_id === resourceId)
 
+  // Estado local para edição
+  const [isEditing, setIsEditing] = useState(false)
+  const [editedHierarchy, setEditedHierarchy] = useState<'gerente' | 'lider' | 'operador'>(resource?.hierarchy || 'operador')
+  const [editedRole, setEditedRole] = useState(resource?.role || '')
+  const [editedLeaderId, setEditedLeaderId] = useState<string | null>(resource?.leader_id || null)
+  const [isSaving, setIsSaving] = useState(false)
+
+  // Atualizar estado quando mudar de recurso
+  useEffect(() => {
+    setEditedHierarchy(resource?.hierarchy || 'operador')
+    setEditedRole(resource?.role || '')
+    setEditedLeaderId(resource?.leader_id || null)
+    setIsEditing(false)
+  }, [resourceId, resource?.hierarchy, resource?.role, resource?.leader_id])
+
   if (!resource) return null
 
-  const roleIcons = {
+  // Lista de líderes disponíveis (gerentes e líderes) - usar hierarchy, não role
+  const availableLeaders = resources.filter(r =>
+    (r.hierarchy === 'gerente' || r.hierarchy === 'lider') && r.id !== resourceId
+  )
+
+  // Função para salvar alterações
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      const { supabase } = await import('@/lib/supabase')
+
+      const { error } = await supabase
+        .from('resources')
+        .update({
+          hierarchy: editedHierarchy,
+          role: editedRole || null,
+          leader_id: editedLeaderId || null,
+        })
+        .eq('id', resourceId)
+
+      if (error) throw error
+
+      // Atualizar o recurso localmente
+      resource.hierarchy = editedHierarchy
+      resource.role = editedRole || null
+      resource.leader_id = editedLeaderId || null
+
+      setIsEditing(false)
+      alert('Alterações salvas com sucesso!')
+
+      // Recarregar a página para atualizar todos os dados
+      window.location.reload()
+    } catch (error) {
+      console.error('Erro ao salvar:', error)
+      alert('Erro ao salvar alterações')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Função para cancelar edição
+  const handleCancel = () => {
+    setEditedHierarchy(resource.hierarchy || 'operador')
+    setEditedRole(resource.role || '')
+    setEditedLeaderId(resource.leader_id || null)
+    setIsEditing(false)
+  }
+
+  const roleIcons: Record<string, string> = {
     gerente: '👔',
     lider: '👨‍💼',
     operador: '👷'
   }
 
+  const getHierarchyIcon = (hierarchy: string) => {
+    return roleIcons[hierarchy] || '👤'
+  }
+
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col h-full">
       {/* Resource Header */}
       <div className="p-6 border-b bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
         <div className="flex items-start gap-4">
           <div className="w-16 h-16 rounded-full bg-blue-600 flex items-center justify-center text-3xl text-white">
-            {roleIcons[resource.role]}
+            {getHierarchyIcon(resource.hierarchy)}
           </div>
           <div className="flex-1">
             <h3 className="text-2xl font-bold text-gray-900">{resource.name}</h3>
             <div className="flex items-center gap-3 mt-1 text-sm text-gray-600">
-              <span className="capitalize font-medium">{resource.role}</span>
+              <span className="capitalize font-medium">{resource.role || `${resource.hierarchy === 'gerente' ? 'Gerente' : resource.hierarchy === 'lider' ? 'Líder' : 'Operador'}`}</span>
               {resource.email && (
                 <>
                   <span>•</span>
@@ -302,6 +380,134 @@ function ResourceDetailsPanel({
 
       {/* Scrollable Content Area */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* Edit Section */}
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <span>✏️</span>
+              <span>Informações do Recurso</span>
+            </h4>
+            {!isEditing && (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors"
+              >
+                Editar
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            {/* Hierarquia (Funcional) */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Hierarquia (Funcional)
+              </label>
+              {isEditing ? (
+                <select
+                  value={editedHierarchy}
+                  onChange={(e) => setEditedHierarchy(e.target.value as 'gerente' | 'lider' | 'operador')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
+                  disabled={isSaving}
+                >
+                  <option value="gerente">👔 Gerente - Pode gerenciar líderes e operadores</option>
+                  <option value="lider">👨‍💼 Líder - Pode gerenciar operadores</option>
+                  <option value="operador">👷 Operador - Nível base</option>
+                </select>
+              ) : (
+                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">
+                  {resource.hierarchy === 'gerente' && '👔 Gerente'}
+                  {resource.hierarchy === 'lider' && '👨‍💼 Líder'}
+                  {resource.hierarchy === 'operador' && '👷 Operador'}
+                </div>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Define permissões e capacidade de gerenciar outros recursos
+              </p>
+            </div>
+
+            {/* Função/Especialidade */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Função / Especialidade (Visual)
+              </label>
+              {isEditing ? (
+                <input
+                  type="text"
+                  value={editedRole}
+                  onChange={(e) => setEditedRole(e.target.value)}
+                  placeholder="Ex: Engenheiro Elétrico, PCP, Soldador..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white placeholder-gray-400"
+                  disabled={isSaving}
+                />
+              ) : (
+                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">
+                  {resource.role || <span className="text-gray-400 italic">Não definido</span>}
+                </div>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Identificação visual da especialidade do recurso
+              </p>
+            </div>
+
+            {/* Líder Responsável */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Líder Responsável
+              </label>
+              {isEditing ? (
+                <select
+                  value={editedLeaderId || ''}
+                  onChange={(e) => setEditedLeaderId(e.target.value || null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
+                  disabled={isSaving}
+                >
+                  <option value="">Nenhum líder</option>
+                  {availableLeaders.map(leader => (
+                    <option key={leader.id} value={leader.id}>
+                      {leader.name} ({leader.hierarchy === 'gerente' ? 'Gerente' : 'Líder'})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">
+                  {resource.leader_id ? (
+                    (() => {
+                      const leader = resources.find(r => r.id === resource.leader_id)
+                      return leader ? `${leader.name} (${leader.hierarchy === 'gerente' ? 'Gerente' : 'Líder'})` : 'Líder não encontrado'
+                    })()
+                  ) : (
+                    <span className="text-gray-400 italic">Não definido</span>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Líder ou gerente responsável por este recurso
+              </p>
+            </div>
+
+            {/* Botões de ação (apenas em modo de edição) */}
+            {isEditing && (
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isSaving ? 'Salvando...' : 'Salvar Alterações'}
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 disabled:opacity-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Allocations Section */}
         <div>
           <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">

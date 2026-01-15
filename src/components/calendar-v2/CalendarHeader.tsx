@@ -2,10 +2,13 @@
 
 import Link from 'next/link'
 import MonthNavigator from './MonthNavigator'
+import TimelineZoomControl, { TimelineZoom } from './TimelineZoomControl'
 
 interface CalendarHeaderProps {
   currentMonth: Date
   onMonthChange: (newMonth: Date) => void
+  zoom: TimelineZoom
+  onZoomChange: (zoom: TimelineZoom) => void
   selectedResource: string | null
   selectedProject: string | null
   resources: Array<{ id: string; name: string }>
@@ -23,6 +26,8 @@ interface CalendarHeaderProps {
 export default function CalendarHeader({
   currentMonth,
   onMonthChange,
+  zoom,
+  onZoomChange,
   selectedResource,
   selectedProject,
   resources,
@@ -56,6 +61,9 @@ export default function CalendarHeader({
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Zoom Control */}
+          <TimelineZoomControl zoom={zoom} onZoomChange={onZoomChange} />
+
           {/* Add Personal Event Button */}
           <button
             onClick={onAddEvent}

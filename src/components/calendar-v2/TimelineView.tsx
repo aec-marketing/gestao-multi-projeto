@@ -9,9 +9,9 @@ import ResourceGroupHeader from './ResourceGroupHeader'
 import { generateProjectColorMap, PROJECT_COLORS } from './TimelineTaskBar'
 
 interface GroupedResources {
-  gerente: Array<{ id: string; name: string; role: string }>
-  lider: Array<{ id: string; name: string; role: string }>
-  operador: Array<{ id: string; name: string; role: string }>
+  gerente: Array<{ id: string; name: string; hierarchy: string; role: string | null }>
+  lider: Array<{ id: string; name: string; hierarchy: string; role: string | null }>
+  operador: Array<{ id: string; name: string; hierarchy: string; role: string | null }>
 }
 
 interface TimelineViewProps {
@@ -69,7 +69,7 @@ export default function TimelineView({
   // Render a group of resources
   const renderGroup = (
     role: 'gerente' | 'lider' | 'operador',
-    resources: Array<{ id: string; name: string; role: string }>
+    resources: Array<{ id: string; name: string; hierarchy: string; role: string | null }>
   ) => {
     if (resources.length === 0) return null
 

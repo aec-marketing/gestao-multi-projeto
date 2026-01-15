@@ -5,6 +5,7 @@ import { useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { ImportPreview } from '@/types/database.types'
+import ClientSelector from './ClientSelector'
 
 interface ImportMSProjectProps {
   onImportComplete?: () => void
@@ -25,6 +26,8 @@ export default function ImportMSProject({ onImportComplete }: ImportMSProjectPro
   const [category, setCategory] = useState<string>('')
   const [leaderId, setLeaderId] = useState<string>('')
   const [vendorName, setVendorName] = useState<string>('')
+  const [clientName, setClientName] = useState<string>('')
+  const [clientLogoUrl, setClientLogoUrl] = useState<string | null>(null)
 
   /**
    * Process file (shared between file input and drag-drop)
@@ -143,7 +146,9 @@ export default function ImportMSProject({ onImportComplete }: ImportMSProjectPro
           metadata: {
             category,
             leaderId: leaderId || null,
-            vendorName: vendorName || 'Não especificado'
+            vendorName: vendorName || 'Não especificado',
+            clientName: clientName || null,
+            clientLogoUrl: clientLogoUrl || null
           }
         })
       })
@@ -519,6 +524,24 @@ export default function ImportMSProject({ onImportComplete }: ImportMSProjectPro
                   <option value="readequacao">Readequação</option>
                   <option value="retrofit">Retrofit</option>
                 </select>
+              </div>
+
+              {/* Cliente */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Cliente
+                </label>
+                <ClientSelector
+                  value={clientName}
+                  onSelect={(name, logoUrl) => {
+                    setClientName(name)
+                    setClientLogoUrl(logoUrl)
+                  }}
+                  placeholder="Digite o nome do cliente..."
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  Comece a digitar para buscar clientes existentes ou criar um novo
+                </p>
               </div>
 
               {/* Vendedor */}

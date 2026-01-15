@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from 'react'
 import { Project } from '@/types/database.types'
-import { useBatchUpdateTasks, useDeleteTask } from '@/queries/tasks.queries'
+import { useBatchUpdateTasks, useDeleteTask, useCreateTask, useUpdateTask } from '@/queries/tasks.queries'
 import { useTableData } from '@/hooks/table/useTableData'
 import { useTableFilters } from '@/hooks/table/useTableFilters'
 import { usePendingChanges } from '@/hooks/table/usePendingChanges'
@@ -10,12 +10,14 @@ import { useTaskCalculations } from '@/hooks/table/useTaskCalculations'
 import { TableToolbar } from './TableToolbar'
 import { TableHeader } from './TableHeader'
 import { TaskRow } from './TaskRow'
+import { NewTaskRow } from './NewTaskRow'
 import { BatchSaveBar } from './BatchSaveBar'
 import { LoadingOverlay } from '@/components/ui/LoadingOverlay'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ConfirmModal } from '@/components/modals/ConfirmModal'
 import { DurationAdjustModal, DurationAdjustmentType } from '@/components/modals/DurationAdjustModal'
-import { applyDurationAdjustment } from '@/utils/taskDateSync'
+import { applyDurationAdjustment, calculateEndDateFromDuration } from '@/utils/taskDateSync'
+import { generateNextWbsCode } from '@/utils/wbs'
 import TableViewErrorBoundary from '@/components/error-boundary/TableViewErrorBoundary'
 
 interface TableViewTabProps {
@@ -65,12 +67,26 @@ export default function TableViewTab({ project }: TableViewTabProps) {
   // ==================== MUTATIONS ====================
   const batchUpdateMutation = useBatchUpdateTasks(project.id)
   const deleteTaskMutation = useDeleteTask(project.id)
+  const createTaskMutation = useCreateTask(project.id)
+  const updateTaskMutation = useUpdateTask(project.id)
 
   // ==================== CALCULATIONS ====================
   const { calculateTotalCost } = useTaskCalculations(tasks)
 
   // ==================== UI STATE ====================
   const [isAddingTask, setIsAddingTask] = useState(false)
+  const [newTaskData, setNewTaskData] = useState({
+    name: '',
+    type: 'projeto_mecanico' as const,
+    duration: 1
+  })
+
+  const [addingSubtaskTo, setAddingSubtaskTo] = useState<string | null>(null)
+  const [newSubtaskData, setNewSubtaskData] = useState({
+    name: '',
+    duration: 1
+  })
+
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean
     title: string
@@ -186,11 +202,146 @@ export default function TableViewTab({ project }: TableViewTabProps) {
   }, [prepareBatchUpdates, tasks, batchUpdateMutation, clearChanges])
 
   /**
+   * Handler para criar nova tarefa principal
+   */
+  const handleCreateTask = useCallback(async () => {
+    if (!newTaskData.name.trim()) {
+      alert('Digite um nome para a tarefa')
+      return
+    }
+
+    // Calculate next sort_order
+    const maxSortOrder = tasks.length > 0
+      ? Math.max(...tasks.map(t => t.sort_order || 0))
+      : 0
+
+    // Gerar WBS automaticamente
+    const wbsCode = generateNextWbsCode(tasks, null)
+
+    try {
+      await createTaskMutation.mutateAsync({
+        name: newTaskData.name.trim(),
+        type: newTaskData.type,
+        duration: newTaskData.duration,
+        progress: 0,
+        sort_order: maxSortOrder + 1,
+        parent_id: null,
+        wbs_code: wbsCode,
+        outline_level: 0,
+        is_optional: false,
+        is_critical_path: false
+      })
+
+      // Reset form
+      setNewTaskData({ name: '', type: 'projeto_mecanico', duration: 1 })
+      setIsAddingTask(false)
+    } catch (error) {
+      console.error('Error creating task:', error)
+    }
+  }, [newTaskData, tasks, createTaskMutation])
+
+  /**
+   * Handler para cancelar criação de tarefa
+   */
+  const handleCancelCreateTask = useCallback(() => {
+    setNewTaskData({ name: '', type: 'projeto_mecanico', duration: 1 })
+    setIsAddingTask(false)
+  }, [])
+
+  /**
    * Handler para adicionar subtarefa
    */
   const handleAddSubtask = useCallback((taskId: string) => {
-    // TODO: Implementar modal de adicionar subtarefa
-    console.log('Add subtask to:', taskId)
+    setAddingSubtaskTo(taskId)
+    setNewSubtaskData({ name: '', duration: 1 })
+  }, [])
+
+  /**
+   * Handler para criar subtarefa
+   */
+  const handleCreateSubtask = useCallback(async (parentTaskId: string) => {
+    if (!newSubtaskData.name.trim()) {
+      alert('Digite um nome para a subtarefa')
+      return
+    }
+
+    const parentTask = tasks.find(t => t.id === parentTaskId)
+    if (!parentTask) return
+
+    // Calculate next sort_order
+    const maxSortOrder = tasks.length > 0
+      ? Math.max(...tasks.map(t => t.sort_order || 0))
+      : 0
+
+    // Calculate end_date based on parent's start_date
+    let subtaskEndDate = null
+    if (parentTask.start_date) {
+      subtaskEndDate = calculateEndDateFromDuration(
+        parentTask.start_date,
+        newSubtaskData.duration
+      )
+    }
+
+    // Gerar WBS automaticamente (ex: se pai é "1", subtarefa será "1.1")
+    const wbsCode = generateNextWbsCode(tasks, parentTaskId)
+
+    // Calcular outline_level baseado no pai
+    const outlineLevel = (parentTask.outline_level || 0) + 1
+
+    try {
+      const newSubtask = await createTaskMutation.mutateAsync({
+        name: newSubtaskData.name.trim(),
+        type: 'subtarefa',
+        duration: newSubtaskData.duration,
+        progress: 0,
+        sort_order: maxSortOrder + 1,
+        parent_id: parentTaskId,
+        wbs_code: wbsCode,
+        outline_level: outlineLevel,
+        start_date: parentTask.start_date,
+        end_date: subtaskEndDate,
+        is_optional: false,
+        is_critical_path: false
+      })
+
+      // Check if parent duration needs updating
+      const siblings = tasks.filter(t => t.parent_id === parentTaskId)
+      const allDurations = [...siblings.map(s => s.duration || 0), newSubtaskData.duration]
+      const maxSubtaskDuration = Math.max(...allDurations)
+
+      if (maxSubtaskDuration > (parentTask.duration || 0)) {
+        // Update parent task duration and end_date
+        let newParentEndDate = parentTask.end_date
+        if (parentTask.start_date) {
+          newParentEndDate = calculateEndDateFromDuration(
+            parentTask.start_date,
+            maxSubtaskDuration
+          )
+        }
+
+        await updateTaskMutation.mutateAsync({
+          id: parentTaskId,
+          updates: {
+            duration: maxSubtaskDuration,
+            end_date: newParentEndDate
+          }
+        })
+      }
+
+      // Reset form
+      setNewSubtaskData({ name: '', duration: 1 })
+      setAddingSubtaskTo(null)
+    } catch (error) {
+      console.error('Error creating subtask:', error)
+    }
+  }, [newSubtaskData, tasks, createTaskMutation, updateTaskMutation])
+
+  /**
+   * Handler para cancelar criação de subtarefa
+   */
+  const handleCancelCreateSubtask = useCallback(() => {
+    setNewSubtaskData({ name: '', duration: 1 })
+    setAddingSubtaskTo(null)
   }, [])
 
   /**
@@ -292,6 +443,22 @@ export default function TableViewTab({ project }: TableViewTabProps) {
             <table className="w-full">
               <TableHeader />
               <tbody className="bg-white divide-y divide-gray-200">
+                {/* Linha de nova tarefa */}
+                {isAddingTask && (
+                  <NewTaskRow
+                    name={newTaskData.name}
+                    type={newTaskData.type}
+                    duration={newTaskData.duration}
+                    onNameChange={(value) => setNewTaskData(prev => ({ ...prev, name: value }))}
+                    onTypeChange={(value) => setNewTaskData(prev => ({ ...prev, type: value as any }))}
+                    onDurationChange={(value) => setNewTaskData(prev => ({ ...prev, duration: value }))}
+                    onSave={handleCreateTask}
+                    onCancel={handleCancelCreateTask}
+                    isSaving={createTaskMutation.isPending}
+                  />
+                )}
+
+                {/* Tarefas existentes */}
                 {filteredMainTasks.map(task => (
                   <TaskRow
                     key={task.id}
@@ -306,6 +473,13 @@ export default function TableViewTab({ project }: TableViewTabProps) {
                     onAddSubtask={handleAddSubtask}
                     onDelete={handleDelete}
                     calculateTotalCost={calculateTotalCost}
+                    addingSubtaskTo={addingSubtaskTo}
+                    newSubtaskData={newSubtaskData}
+                    onSubtaskNameChange={(value) => setNewSubtaskData(prev => ({ ...prev, name: value }))}
+                    onSubtaskDurationChange={(value) => setNewSubtaskData(prev => ({ ...prev, duration: value }))}
+                    onSaveSubtask={handleCreateSubtask}
+                    onCancelSubtask={handleCancelCreateSubtask}
+                    isSavingSubtask={createTaskMutation.isPending && addingSubtaskTo !== null}
                   />
                 ))}
               </tbody>

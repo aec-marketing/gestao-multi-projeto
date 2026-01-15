@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useCalendarDates } from '@/hooks/calendar/useCalendarDates'
+import { useCalendarDates, TimelineZoom } from '@/hooks/calendar/useCalendarDates'
 import { useCalendarFilters } from '@/hooks/calendar/useCalendarFilters'
 import { useCalendarData } from '@/hooks/calendar/useCalendarData'
 import { usePersonalEvents } from '@/hooks/useResources'
@@ -18,6 +18,9 @@ import PersonalEventModal from '../modals/PersonalEventModal'
 export default function CalendarLayout() {
   // Month navigation state
   const [currentMonth, setCurrentMonth] = useState<Date>(getCurrentMonth())
+
+  // Zoom state
+  const [zoom, setZoom] = useState<TimelineZoom>('month')
 
   // Tab state (prepare for future Projects tab)
   const [activeTab, setActiveTab] = useState<'timeline' | 'projects'>('timeline')
@@ -42,8 +45,8 @@ export default function CalendarLayout() {
   // Personal events hook for refresh after event creation
   const { refresh: refreshPersonalEvents } = usePersonalEvents()
 
-  // Date range for current month
-  const { dateRange, monthName } = useCalendarDates(currentMonth)
+  // Date range based on zoom level
+  const { dateRange, displayLabel } = useCalendarDates(currentMonth, zoom)
 
   // Transform data using memoized hook
   const {
@@ -116,6 +119,8 @@ export default function CalendarLayout() {
       <CalendarHeader
         currentMonth={currentMonth}
         onMonthChange={setCurrentMonth}
+        zoom={zoom}
+        onZoomChange={setZoom}
         selectedResource={selectedResource}
         selectedProject={selectedProject}
         resources={allResources}

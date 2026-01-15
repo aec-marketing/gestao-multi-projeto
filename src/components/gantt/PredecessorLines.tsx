@@ -34,11 +34,13 @@ export default function PredecessorLines({
   const [hoveredBadge, setHoveredBadge] = React.useState<string | null>(null)
 
   // Converte tipo do banco para display
+  // NOTA: 'inicio_fim' (SF - Start-to-Finish) não está implementado no database ENUM
+  // mas mantemos aqui para compatibilidade com futuras versões
   const typeDisplay: Record<string, string> = {
     'fim_inicio': 'FS',
     'inicio_inicio': 'SS',
     'fim_fim': 'FF',
-    'inicio_fim': 'SF'
+    'inicio_fim': 'SF' // Não implementado no banco - placeholder para futuro
   }
 
   // Gera descrição verbal da relação de predecessor
