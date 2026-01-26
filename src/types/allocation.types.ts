@@ -24,6 +24,9 @@ export interface Allocation {
   priority: 'alta' | 'media' | 'baixa'
   start_date?: string | null
   end_date?: string | null
+  // 🆕 CAMPOS PREPARATÓRIOS (ONDA 3)
+  allocated_minutes?: number | null  // Minutos específicos deste recurso (NULL = 100% da task)
+  overtime_minutes?: number  // Minutos de hora extra (custo × 1.5 ou 2.0)
   created_at?: string
   updated_at?: string
 }

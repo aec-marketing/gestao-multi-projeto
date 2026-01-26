@@ -1,16 +1,22 @@
 /**
  * Linha inline para criar nova tarefa
+ * ONDA 2: Atualizado para usar TimeInput e minutos
  */
 
 import React from 'react'
+import { TimeInputInline } from '@/components/ui/TimeInput'
+import { WorkTypeSelect } from '@/components/ui/WorkTypeSelect'
+import { WorkType } from '@/utils/workType.utils'
 
 interface NewTaskRowProps {
   name: string
   type: string
-  duration: number
+  workType: WorkType  // ONDA 3: Categoria (Produção/Dependência/Checkpoint)
+  duration: number  // ONDA 2: Agora em MINUTOS (não mais dias)
   onNameChange: (value: string) => void
   onTypeChange: (value: string) => void
-  onDurationChange: (value: number) => void
+  onWorkTypeChange: (value: WorkType) => void  // ONDA 3
+  onDurationChange: (minutes: number) => void  // ONDA 2: Recebe minutos
   onSave: () => void
   onCancel: () => void
   isSaving?: boolean
@@ -19,9 +25,11 @@ interface NewTaskRowProps {
 export function NewTaskRow({
   name,
   type,
+  workType,
   duration,
   onNameChange,
   onTypeChange,
+  onWorkTypeChange,
   onDurationChange,
   onSave,
   onCancel,
@@ -77,18 +85,57 @@ export function NewTaskRow({
         </select>
       </td>
 
-      {/* Duração */}
+      {/* Categoria (Work Type) - ONDA 3 */}
       <td className="px-4 py-2">
-        <input
-          type="number"
-          value={duration}
-          onChange={(e) => onDurationChange(parseFloat(e.target.value) || 1)}
-          onKeyDown={handleKeyDown}
-          step="0.125"
-          min="0.125"
-          className="w-20 px-2 py-1 border border-green-300 rounded text-sm text-gray-900 text-center focus:ring-2 focus:ring-green-500 focus:border-green-500"
+        <WorkTypeSelect
+          value={workType}
+          onChange={(newWorkType) => {
+            onWorkTypeChange(newWorkType)
+            // Se mudar para Checkpoint, forçar duration = 0
+            if (newWorkType === 'milestone') {
+              onDurationChange(0)
+            }
+          }}
           disabled={isSaving}
+          className="w-full border-green-300 focus:ring-green-500 focus:border-green-500"
         />
+      </td>
+
+      {/* Duração - ONDA 2: TimeInput / ONDA 2.5: Input separado para Wait */}
+      <td className="px-4 py-2">
+        {workType === 'wait' ? (
+          // Input específico para WAIT (dias corridos)
+          <div className="w-28">
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              value={duration > 0 ? Math.round((duration / 1440) * 10) / 10 : ''}
+              onChange={(e) => {
+                const days = parseFloat(e.target.value) || 0
+                onDurationChange(days * 1440) // Converter para minutos (24h × 60min)
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder="Ex: 7"
+              className="w-full px-2 py-1 border border-green-300 rounded text-sm text-gray-900 text-right focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              disabled={isSaving}
+              title="Dias corridos (inclui fins de semana)"
+            />
+            <div className="text-[10px] text-gray-500 mt-0.5 text-center">
+              dias corridos
+            </div>
+          </div>
+        ) : (
+          // Input padrão para WORK e MILESTONE
+          <div className="w-28">
+            <TimeInputInline
+              value={duration}
+              onChange={onDurationChange}
+              disabled={isSaving || workType === 'milestone'}
+              onEnter={onSave}
+            />
+          </div>
+        )}
       </td>
 
       {/* Início (vazio) */}

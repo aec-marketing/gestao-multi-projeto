@@ -302,19 +302,15 @@ async function saveAllChanges() {
                 const newParentEndDate = new Date(parentTask.start_date)
                 newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
 
+                // ONDA 2: duration é computed, só atualizar end_date
                 await supabase
                   .from('tasks')
                   .update({
-                    duration: maxSubtaskDuration,
                     end_date: newParentEndDate.toISOString().split('T')[0]
                   })
                   .eq('id', parentTask.id)
-              } else {
-                await supabase
-                  .from('tasks')
-                  .update({ duration: maxSubtaskDuration })
-                  .eq('id', parentTask.id)
               }
+              // else: ONDA 2: duration_minutes é calculado automaticamente, não precisa update
             }
           }
         }
@@ -443,7 +439,7 @@ async function createNewSubtask(parentTaskId: string, parentType: string) {
     const maxSubtaskDuration = Math.max(...allSubtasks.map(s => s.duration || 0))
 
     if (maxSubtaskDuration > (parentTask.duration || 0)) {
-      // Atualizar duração e end_date da tarefa pai
+      // Atualizar end_date da tarefa pai (duração é calculada automaticamente)
       if (parentTask.start_date) {
         const newParentEndDate = new Date(parentTask.start_date)
         newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
@@ -451,17 +447,11 @@ async function createNewSubtask(parentTaskId: string, parentType: string) {
         await supabase
           .from('tasks')
           .update({
-            duration: maxSubtaskDuration,
             end_date: newParentEndDate.toISOString().split('T')[0]
           })
           .eq('id', parentTaskId)
-      } else {
-        // Tarefa pai sem data, só atualiza duração
-        await supabase
-          .from('tasks')
-          .update({ duration: maxSubtaskDuration })
-          .eq('id', parentTaskId)
       }
+      // Se não tem start_date, não precisa atualizar nada (duração é computed)
     }
 
     // Resetar form

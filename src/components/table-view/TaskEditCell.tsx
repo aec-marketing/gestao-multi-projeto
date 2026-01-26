@@ -33,14 +33,25 @@ export const TaskEditCell = React.memo(function TaskEditCell({
 }: TaskEditCellProps) {
   // Estado local para o valor sendo editado
   const [localValue, setLocalValue] = useState(value)
+  const [isFocused, setIsFocused] = useState(false)
 
-  // Sincronizar com valor externo quando mudar (após save)
+  // Sincronizar com valor externo APENAS quando não está focado
   useEffect(() => {
-    setLocalValue(value)
-  }, [value])
+    if (!isFocused) {
+      setLocalValue(value)
+    }
+  }, [value, isFocused])
+
+  const handleFocus = () => {
+    setIsFocused(true)
+  }
 
   const handleBlur = () => {
-    onBlur(localValue)
+    setIsFocused(false)
+    // Só notificar se o valor mudou
+    if (localValue !== value) {
+      onBlur(localValue)
+    }
   }
 
   // Classes base com destaque para pending changes
@@ -56,6 +67,7 @@ export const TaskEditCell = React.memo(function TaskEditCell({
         type="text"
         value={localValue || ''}
         onChange={(e) => setLocalValue(e.target.value)}
+        onFocus={handleFocus}
         onBlur={handleBlur}
         onDoubleClick={(e) => e.currentTarget.select()}
         placeholder={placeholder}
@@ -71,6 +83,7 @@ export const TaskEditCell = React.memo(function TaskEditCell({
         type="number"
         value={localValue || ''}
         onChange={(e) => setLocalValue(e.target.value)}
+        onFocus={handleFocus}
         onBlur={handleBlur}
         onDoubleClick={(e) => e.currentTarget.select()}
         placeholder={placeholder}
@@ -88,6 +101,7 @@ export const TaskEditCell = React.memo(function TaskEditCell({
         type="date"
         value={localValue || ''}
         onChange={(e) => setLocalValue(e.target.value)}
+        onFocus={handleFocus}
         onBlur={handleBlur}
         disabled={disabled}
         className={`${baseClasses} text-gray-900`}

@@ -215,7 +215,7 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
               onClick={() => setViewMode('table')}
               className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 ${
                 viewMode === 'table'
-                  ? 'text-blue-600 border-blue-600'
+                  ? 'text-yellow-600 border-blue-600'
                   : 'text-gray-600 border-transparent hover:text-gray-900'
               }`}
             >
@@ -350,7 +350,7 @@ function FinancialViewPlaceholder() {
         </div>
         <div className="bg-white rounded-lg border p-6">
           <div className="text-sm text-gray-600 mb-1">Status</div>
-          <div className="text-2xl font-bold text-blue-600">No prazo</div>
+          <div className="text-2xl font-bold text-yellow-600">No prazo</div>
           <div className="text-xs text-gray-500 mt-1">Em desenvolvimento</div>
         </div>
       </div>

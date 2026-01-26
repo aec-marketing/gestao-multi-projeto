@@ -1,0 +1,40 @@
+- Duração Tarefa Pai não esta considerando minutos:
+Filhos com duração de 4hrs e outro com 1d e 6hs arredonda pai para 2.0d
+Confirme se esse é o calculo correto.
+
+- Alocação de pessoas quando fragmentação acontece entope a coluna “Pessoas ” com nomes duplicados. 
+Uma solução pode ser concentrar todos nomes em um só e usar um badge com o numero de fragmentações acontecendo. Seria bom se o modal que abrisse tambem relatasse a fragmentação antes de mostrar as opções de edição para cada alocação.
+
+
+
+- Nenhuma indicação no gantt quando hora extra esta sendo usada. 
+Uma solução é adicionar uma cor de borda ou na barra como um alerta
+
+- Hora extra não esta considerando o máximo permitido pela CLT Brasileira.
+Uma solução é ele entender apenas +2 horas como o máximo de hora extra por dias de semana (segunda a sexta feira, quando a tarefa pede mais ele automaticamente envia o resto da tarefa para o próximo dia útil.
+
+ - Algumas tarefas podem acabar exigindo mais de uma hora extra.
+ex.: Tarefa Montagem dura 24 horas. Ela é uma tarefa urgente e precisa ser terminada o mais rápido possível. No primeiro dia aloco 9 hrs + 2 hrs extra, no proximo tambem, 9hrs +2hrs extra, no terceiro dia termino fazendo apenas as outras 2 horas necessárias.
+Hoje, o calculo que ele faz ele considera todas as horas depois do primeiro dia como hora extra, a extimativa para essa tarefa fica assim:
+
+Estimativa para este recurso
+Gabriel trabalha 9h/dia
+Esta tarefa de 2.7 dias levará aproximadamente:
+⏱️ 2.7 dia(s) útil(eis)
+Custo deste recurso:
+💰 R$ 7.087,50
+24.3h (100% da tarefa) × R$ 150,00/h = R$ 3.645,00
++ 15.3h extra × R$ 225,00/h = R$ 3.442,50
+
+- Fontes nos itens da coluna “Categoria” estão com cor errada e branca.
+
+- Precisamos considerar o peso dos fins de semana:
+Tarefa longa que vai passar pelos fins de semana? Alerta sobre isso e deixa o usuário decidir se vai utilizar aqueles dias ou empurrar pro próximo dia util. Precisamos da lógica para cobrir diversos fins de seman dentro de uma mesma tarefa. Por exemplo:
+Tarefa Montagem demora no seu total 12 dias, nessa situação não quero que nenhuma hora extra seja utilizada e que ela seja executada apenas nos dias da semana. Hoje que eu adicionar uma tarefa de 12 dias, vamos dizer que ele começa dia 12/01, em uma segunda feira.
+Nessa situção, a tarefa termina sexta feira dia 23/01, porém isso se considerar que a tarefa estará sendo exercida sabado dia 17 e domingo dia 18.
+O correto seria o usuário poder escolher pular esses fins de semana. Numa situação que eu quero pular fins de semana, a tarefa começaria dia 12, iria até sexta feira dia 16, esperaria durante dois dias e voltaria dia 19. Iria até dia 23, pararia para os dias 24 e 25 e voltaria dia 26, finalmente terminando dia 27.
+Isso claro, sem considerar hora extra em nenhum dos dias.
+Caso os fins de semana se tornem algo a ser utilizado, ele precisa contar como hora extra e os dias a ser considerado isso devem ser escolhidos manualmente.
+
+
+

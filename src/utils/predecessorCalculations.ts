@@ -1,12 +1,14 @@
 import { Task } from '@/types/database.types'
 import { parseLocalDate, formatLocalDate } from './taskDateSync'
+import { minutesToDays, MINUTES_PER_WORKING_DAY } from './time.utils'
 
 interface Predecessor {
   id: string
   task_id: string
   predecessor_id: string
   type: string // 'fim_inicio', 'inicio_inicio', 'fim_fim'
-  lag_time: number
+  lag_time: number              // Campo legado (computed)
+  lag_minutes?: number          // Campo NOVO (ONDA 1)
 }
 
 interface TaskUpdate {
@@ -20,6 +22,7 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24
 
 /**
  * Calcula a data de uma tarefa baseada em seu predecessor
+ * ATUALIZADO: Considera offset intra-dia para predecessores FS
  */
 export function calculateTaskDateFromPredecessor(
   task: Task,
@@ -38,32 +41,72 @@ export function calculateTaskDateFromPredecessor(
   if (!predStart || !predEnd) {
     throw new Error('Invalid predecessor dates')
   }
-  const lagDays = predecessorRelation.lag_time || 0
-  const taskDuration = task.duration || 1
+
+  // ONDA 1: Usar lag_minutes se disponível, senão converter lag_time
+  const lagMinutes = predecessorRelation.lag_minutes ?? (predecessorRelation.lag_time * MINUTES_PER_WORKING_DAY)
+  const lagDays = minutesToDays(lagMinutes)
+
+  // ONDA 1: Usar duration_minutes como campo principal
+  const taskDurationMinutes = task.duration_minutes ?? MINUTES_PER_WORKING_DAY
+  const taskDuration = minutesToDays(taskDurationMinutes)
+
+  // Duração do predecessor em minutos
+  const predDurationMinutes = predecessor.duration_minutes ?? MINUTES_PER_WORKING_DAY
+  const predDurationDays = minutesToDays(predDurationMinutes)
 
   let newStartDate: Date
 
   switch (predecessorRelation.type) {
     case 'fim_inicio':
+    case 'FS':
       // Tarefa começa após predecessor terminar
       newStartDate = new Date(predEnd)
-      newStartDate.setDate(newStartDate.getDate() + 1 + lagDays)
+
+      // NOVO: Calcular offset intra-dia
+      // Se o predecessor ocupa parcialmente o último dia, a tarefa deve começar DEPOIS desse offset
+      const lastDayOccupancy = predDurationDays - Math.floor(predDurationDays)
+
+      if (lastDayOccupancy > 0 && lastDayOccupancy < 1) {
+        // Predecessor termina parcialmente no dia
+        // A tarefa começa NO MESMO DIA, após o offset
+        // Não avançar para o próximo dia
+      } else {
+        // Predecessor ocupa o dia inteiro, avançar para o próximo dia
+        newStartDate.setDate(newStartDate.getDate() + 1)
+      }
+
+      // Aplicar lag
+      if (lagDays > 0) {
+        newStartDate.setDate(newStartDate.getDate() + lagDays)
+      }
       break
 
     case 'inicio_inicio':
+    case 'SS':
       // Tarefa começa junto com predecessor
       newStartDate = new Date(predStart)
       newStartDate.setDate(newStartDate.getDate() + lagDays)
       break
 
     case 'fim_fim':
+    case 'FF':
       // Tarefa termina junto com predecessor
       const targetEndDate = new Date(predEnd)
       targetEndDate.setDate(targetEndDate.getDate() + lagDays)
 
       // Calcula data de início baseada na duração
       newStartDate = new Date(targetEndDate)
-      newStartDate.setDate(newStartDate.getDate() - taskDuration + 1)
+      newStartDate.setDate(newStartDate.getDate() - Math.ceil(taskDuration) + 1)
+      break
+
+    case 'inicio_fim':
+    case 'SF':
+      // Tarefa termina quando predecessor começa
+      const targetEnd = new Date(predStart)
+      targetEnd.setDate(targetEnd.getDate() + lagDays)
+
+      newStartDate = new Date(targetEnd)
+      newStartDate.setDate(newStartDate.getDate() - Math.ceil(taskDuration) + 1)
       break
 
     default:
@@ -73,9 +116,10 @@ export function calculateTaskDateFromPredecessor(
       newStartDate = new Date(task.start_date)
   }
 
-  // Calcula data de término
+  // Calcula data de término baseada na duração em minutos
   const newEndDate = new Date(newStartDate)
-  newEndDate.setDate(newEndDate.getDate() + taskDuration - 1)
+  const daysToAdd = Math.ceil(taskDuration) - 1
+  newEndDate.setDate(newEndDate.getDate() + daysToAdd)
 
   return {
     start_date: newStartDate,
@@ -336,6 +380,72 @@ export function auditPredecessorConflicts(
       } catch (error) {
         // Erro ao calcular data - ignorar este predecessor
       }
+    }
+  }
+
+  return conflicts
+}
+
+/**
+ * Verifica se uma tarefa específica tem conflitos com seus predecessores
+ * Retorna array de mensagens de conflito (vazio se não houver conflitos)
+ *
+ * @param task - Tarefa a verificar
+ * @param allTasks - Todas as tarefas do projeto
+ * @param allPredecessors - Todos os predecessores do projeto
+ * @returns Array de strings descrevendo os conflitos (vazio se nenhum)
+ */
+export function checkTaskPredecessorConflicts(
+  task: Task,
+  allTasks: Task[],
+  allPredecessors: Predecessor[]
+): string[] {
+  const conflicts: string[] = []
+
+  // Encontrar predecessores desta tarefa
+  const taskPredecessors = allPredecessors.filter(p => p.task_id === task.id)
+
+  if (taskPredecessors.length === 0 || !task.start_date) {
+    return conflicts
+  }
+
+  // Verificar cada predecessor
+  for (const pred of taskPredecessors) {
+    const predecessorTask = allTasks.find(t => t.id === pred.predecessor_id)
+
+    if (!predecessorTask || !predecessorTask.start_date || !predecessorTask.end_date) {
+      continue
+    }
+
+    try {
+      const calculatedDates = calculateTaskDateFromPredecessor(
+        task,
+        predecessorTask,
+        pred
+      )
+
+      const currentStartDate = parseLocalDate(task.start_date)
+      if (!currentStartDate) continue
+
+      const currentStartTime = currentStartDate.getTime()
+      const calculatedStartTime = calculatedDates.start_date.getTime()
+
+      // Se a data atual é anterior à data calculada, há conflito
+      if (currentStartTime < calculatedStartTime) {
+        const daysDiff = Math.ceil((calculatedStartTime - currentStartTime) / MS_PER_DAY)
+
+        // Formatar mensagem de conflito
+        const predEndDate = parseLocalDate(predecessorTask.end_date)
+        const predEndFormatted = predEndDate
+          ? `${predEndDate.getDate().toString().padStart(2, '0')}/${(predEndDate.getMonth() + 1).toString().padStart(2, '0')}/${predEndDate.getFullYear()}`
+          : 'data desconhecida'
+
+        conflicts.push(
+          `Inicia antes do término de "${predecessorTask.name}" (${predEndFormatted}). Deveria começar ${daysDiff} dia(s) mais tarde.`
+        )
+      }
+    } catch (error) {
+      // Erro ao calcular - ignorar
     }
   }
 

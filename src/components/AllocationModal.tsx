@@ -5,14 +5,21 @@ import { supabase } from '@/lib/supabase'
 import { Resource, Task } from '@/types/database.types'
 import { Allocation, PRIORITY_CONFIG } from '@/types/allocation.types'
 import { formatDateBR } from '@/utils/date.utils'
+import { formatMinutes } from '@/utils/time.utils'
+import { calculateResourceCost, formatCurrency } from '@/utils/cost.utils'
 import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
 import { useActiveResources, useAllocations } from '@/hooks/useResources'
 import { useResourceContext } from '@/contexts/ResourceContext'
 import { checkResourceAvailability, ResourceConflict } from '@/lib/resource-service'
+import { updateTaskActualCost } from '@/lib/task-cost-service'
+import { detectCapacityOverflow, generateOvertimeOptions, CapacityOverflowResult, OvertimeOption, calculateMultiDayAllocationPlan, MultiDayAllocationPlan } from '@/utils/allocation.utils'
+import { OvertimeDecisionModal } from '@/components/project/OvertimeDecisionModal'
+import { MultiDayAllocationModal, DayDecision } from '@/components/project/MultiDayAllocationModal'
 
 interface AllocationModalProps {
   task: Task
   projectLeaderId: string | null
+  allocationId?: string  // ONDA 3: ID da alocação para modo de edição (opcional)
   onClose: () => void
   onSuccess: () => void
 }
@@ -20,6 +27,7 @@ interface AllocationModalProps {
 export default function AllocationModal({
   task,
   projectLeaderId,
+  allocationId,  // ONDA 3: ID da alocação para edição
   onClose,
   onSuccess
 }: AllocationModalProps) {
@@ -37,9 +45,217 @@ export default function AllocationModal({
   const [allowOverride, setAllowOverride] = useState(false)
   const [conflictingPriorities, setConflictingPriorities] = useState<string[]>([])
 
+  // ONDA 3: Alocação parcial
+  const [allocationType, setAllocationType] = useState<'full' | 'partial'>('full')
+  const [allocatedMinutes, setAllocatedMinutes] = useState<number>(task.duration_minutes || 0)
+
+  // ONDA 3: Hora extra
+  const [hasOvertime, setHasOvertime] = useState(false)
+  const [overtimeMinutes, setOvertimeMinutes] = useState<number>(0)
+  const [overtimeMultiplier, setOvertimeMultiplier] = useState<number>(1.5) // Padrão: 50% a mais
+
+  // ONDA 3: Estado do modal de decisão de hora extra
+  const [showOvertimeDecisionModal, setShowOvertimeDecisionModal] = useState(false)
+  const [overflowResult, setOverflowResult] = useState<CapacityOverflowResult | null>(null)
+  const [overtimeOptions, setOvertimeOptions] = useState<OvertimeOption[]>([])
+  const [selectedResourceForModal, setSelectedResourceForModal] = useState<Resource | null>(null)
+  const [pendingAllocation, setPendingAllocation] = useState<{
+    resourceId: string
+    priority: 'alta' | 'media' | 'baixa'
+    allocationType: 'full' | 'partial'
+    allocatedMinutes: number
+  } | null>(null)
+
+  // ONDA 3.5: Estado do modal multi-dia recursivo
+  const [showMultiDayModal, setShowMultiDayModal] = useState(false)
+  const [multiDayPlan, setMultiDayPlan] = useState<MultiDayAllocationPlan | null>(null)
+
   // Filter allocations for this specific task
   const existingAllocations = allAllocations.filter(a => a.task_id === task.id)
   const isLoading = resourcesLoading
+
+  // ONDA 3: Carregar dados da alocação existente quando em modo de edição
+  useEffect(() => {
+    if (allocationId) {
+      const allocation = allAllocations.find(a => a.id === allocationId)
+      if (allocation) {
+        setSelectedResourceId(allocation.resource_id)
+        setPriority(allocation.priority as 'alta' | 'media' | 'baixa')
+
+        // Carregar alocação parcial
+        if (allocation.allocated_minutes !== null && allocation.allocated_minutes !== undefined) {
+          setAllocationType('partial')
+          setAllocatedMinutes(allocation.allocated_minutes)
+        } else {
+          setAllocationType('full')
+          setAllocatedMinutes(task.duration_minutes || 0)
+        }
+
+        // Carregar hora extra
+        if (allocation.overtime_minutes && allocation.overtime_minutes > 0) {
+          setHasOvertime(true)
+          setOvertimeMinutes(allocation.overtime_minutes)
+          setOvertimeMultiplier((allocation as any).overtime_multiplier || 1.5)
+        } else {
+          setHasOvertime(false)
+          setOvertimeMinutes(0)
+          setOvertimeMultiplier(1.5)
+        }
+      }
+    }
+  }, [allocationId, allAllocations, task.duration_minutes])
+
+  // ONDA 3: Detecção automática de overflow quando recurso é selecionado
+  useEffect(() => {
+    const detectOverflow = async () => {
+      console.log('[OVERFLOW-DEBUG] useEffect disparado', {
+        allocationId,
+        selectedResourceId,
+        taskStartDate: task.start_date,
+        taskName: task.name
+      })
+
+      // Só detectar para novas alocações (não em modo de edição)
+      if (allocationId || !selectedResourceId || !task.start_date) {
+        console.log('[OVERFLOW-DEBUG] Saindo cedo:', {
+          motivo: allocationId ? 'modo edição' : !selectedResourceId ? 'sem recurso' : 'sem data'
+        })
+        return
+      }
+
+      const selectedResource = allResources.find(r => r.id === selectedResourceId)
+      if (!selectedResource) {
+        console.log('[OVERFLOW-DEBUG] Recurso não encontrado:', selectedResourceId)
+        return
+      }
+
+      console.log('[OVERFLOW-DEBUG] Recurso selecionado:', {
+        nome: selectedResource.name,
+        capacidadeDiaria: selectedResource.daily_capacity_minutes
+      })
+
+      // Minutos que queremos alocar
+      const minutesToAllocate = allocationType === 'partial' ? allocatedMinutes : task.duration_minutes || 0
+
+      console.log('[OVERFLOW-DEBUG] Minutos a alocar:', {
+        allocationType,
+        minutesToAllocate,
+        taskDurationMinutes: task.duration_minutes,
+        allocatedMinutes
+      })
+
+      // Buscar alocações existentes do recurso no mesmo dia (start_date)
+      const existingAllocationsOnDate = allAllocations.filter(a =>
+        a.resource_id === selectedResourceId &&
+        a.start_date === task.start_date &&
+        a.task_id !== task.id
+      )
+
+      console.log('[OVERFLOW-DEBUG] Alocações existentes no dia:', {
+        quantidade: existingAllocationsOnDate.length,
+        alocacoes: existingAllocationsOnDate.map(a => ({
+          allocated_minutes: a.allocated_minutes,
+          task_id: a.task_id
+        }))
+      })
+
+      // Calcular total de minutos já alocados neste dia
+      // IMPORTANTE: Se allocated_minutes é NULL, buscar duration_minutes da tarefa
+      let existingMinutesOnDate = 0
+
+      for (const alloc of existingAllocationsOnDate) {
+        if (alloc.allocated_minutes !== null && alloc.allocated_minutes !== undefined) {
+          // Tem valor explícito
+          console.log('[OVERFLOW-DEBUG] Somando minutos (explícito):', { alloc_id: alloc.id, minutes: alloc.allocated_minutes })
+          existingMinutesOnDate += alloc.allocated_minutes
+        } else {
+          // NULL = 100% da tarefa, buscar duration_minutes
+          console.log('[OVERFLOW-DEBUG] allocated_minutes é NULL, buscando task...')
+          const { data: taskData, error } = await supabase
+            .from('tasks')
+            .select('duration_minutes')
+            .eq('id', alloc.task_id)
+            .single()
+
+          if (error) {
+            console.error('[OVERFLOW-DEBUG] Erro ao buscar task:', error)
+            continue
+          }
+
+          const minutes = taskData?.duration_minutes || 0
+          console.log('[OVERFLOW-DEBUG] Somando minutos (100% da task):', {
+            alloc_id: alloc.id,
+            task_id: alloc.task_id,
+            duration_minutes: minutes
+          })
+          existingMinutesOnDate += minutes
+        }
+      }
+
+      console.log('[OVERFLOW-DEBUG] Total de minutos já alocados:', existingMinutesOnDate)
+
+      // ONDA 3.5: Calcular plano multi-dia RECURSIVO
+      // Criar mapa de alocações existentes por data
+      const existingAllocationsByDate: Record<string, number> = {}
+      const allResourceAllocations = allAllocations.filter(a => a.resource_id === selectedResourceId)
+
+      for (const alloc of allResourceAllocations) {
+        const dateKey = alloc.start_date
+        if (!existingAllocationsByDate[dateKey]) {
+          existingAllocationsByDate[dateKey] = 0
+        }
+
+        if (alloc.allocated_minutes !== null && alloc.allocated_minutes !== undefined) {
+          existingAllocationsByDate[dateKey] += alloc.allocated_minutes
+        } else {
+          // NULL = 100% da tarefa
+          const { data: taskData } = await supabase
+            .from('tasks')
+            .select('duration_minutes')
+            .eq('id', alloc.task_id)
+            .single()
+
+          existingAllocationsByDate[dateKey] += taskData?.duration_minutes || 0
+        }
+      }
+
+      console.log('[MULTI-DAY-DEBUG] Alocações existentes por data:', existingAllocationsByDate)
+
+      // Calcular plano multi-dia
+      const plan = calculateMultiDayAllocationPlan(
+        minutesToAllocate,
+        selectedResource,
+        task.start_date,
+        existingAllocationsByDate,
+        false // Não usar hora extra automaticamente - perguntar ao usuário
+      )
+
+      console.log('[MULTI-DAY-DEBUG] Plano calculado:', plan)
+
+      // Se o plano requer decisão do usuário (tem dias com overflow), abrir modal multi-dia
+      if (plan.requiresUserDecision) {
+        console.log('[MULTI-DAY-DEBUG] ⚠️ OVERFLOW MULTI-DIA DETECTADO! Abrindo modal...')
+
+        // Guardar informações da alocação pendente
+        setPendingAllocation({
+          resourceId: selectedResourceId,
+          priority: priority,
+          allocationType: allocationType,
+          allocatedMinutes: allocatedMinutes
+        })
+
+        setSelectedResourceForModal(selectedResource)
+        setMultiDayPlan(plan)
+        setShowMultiDayModal(true)
+
+        console.log('[MULTI-DAY-DEBUG] Estado do modal multi-dia atualizado!')
+      } else {
+        console.log('[MULTI-DAY-DEBUG] ✅ Sem overflow ou overflow resolvido automaticamente')
+      }
+    }
+
+    detectOverflow()
+  }, [selectedResourceId, allocationType, allocatedMinutes, allocationId, allResources, allAllocations, task, priority])
 
   async function handleAllocate() {
     if (!selectedResourceId) {
@@ -58,49 +274,73 @@ export default function AllocationModal({
     setShowConflictWarning(false)
 
     try {
-      // ✅ Check for conflicts before allocating
-      const availabilityCheck = await checkResourceAvailability(
-        selectedResourceId,
-        task.start_date,
-        task.end_date
-      )
+      // ONDA 3: Verificação de conflitos (só para novas alocações)
+      // NOTA: A detecção de overflow já aconteceu automaticamente quando o recurso foi selecionado
+      // IMPORTANTE: Agora só verificamos eventos pessoais bloqueantes
+      // Conflitos de alocação são tratados pelo sistema de overflow acima
+      if (!allocationId) {
+        const availabilityCheck = await checkResourceAvailability(
+          selectedResourceId,
+          task.start_date,
+          task.end_date
+        )
 
-      if (!availabilityCheck.isAvailable) {
-        // Extract priorities from conflicting allocations
-        const allocationConflicts = availabilityCheck.conflicts.filter(c => c.type === 'allocation_overlap')
-        const priorities = allocationConflicts
-          .map(c => {
-            const conflictAlloc = allAllocations.find(a => a.id === (c.details as any)?.allocationId)
-            return conflictAlloc?.priority
-          })
-          .filter(Boolean) as string[]
+        // Filtrar apenas conflitos de eventos pessoais bloqueantes
+        const personalEventConflicts = availabilityCheck.conflicts.filter(c => c.type === 'personal_event_block')
 
-        setConflicts(availabilityCheck.conflicts)
-        setConflictingPriorities(priorities)
-        setShowConflictWarning(true)
-        setIsSaving(false)
+        // Só bloquear se houver eventos pessoais bloqueantes (férias, folga, etc)
+        if (personalEventConflicts.length > 0) {
+          setConflicts(personalEventConflicts)
+          setConflictingPriorities([])
+          setShowConflictWarning(true)
+          setAllowOverride(false)  // Não permitir override de eventos pessoais
+          setIsSaving(false)
+          return
+        }
 
-        // Check if override is allowed (only for allocation overlaps, not personal events)
-        const hasPersonalEventBlock = availabilityCheck.conflicts.some(c => c.type === 'personal_event_block')
-        setAllowOverride(!hasPersonalEventBlock && allocationConflicts.length > 0)
-
-        return
+        // Conflitos de alocação (allocation_overlap) agora são ignorados aqui
+        // O sistema de overflow cuida disso baseado em capacidade real
       }
 
-      // Create allocation
-      const { error } = await supabase
-        .from('allocations')
-        .insert({
-          resource_id: selectedResourceId,
-          task_id: task.id,
-          priority: priority,
-          start_date: task.start_date,
-          end_date: task.end_date
-        })
+      // ONDA 3: UPDATE se estiver editando, INSERT se for nova alocação
+      let error
+      if (allocationId) {
+        // Modo de edição: UPDATE
+        const { error: updateError } = await supabase
+          .from('allocations')
+          .update({
+            priority: priority,
+            allocated_minutes: allocationType === 'partial' ? allocatedMinutes : null,
+            overtime_minutes: hasOvertime ? overtimeMinutes : 0,
+            overtime_multiplier: hasOvertime ? overtimeMultiplier : 1.5
+          })
+          .eq('id', allocationId)
+
+        error = updateError
+      } else {
+        // Modo de criação: INSERT
+        const { error: insertError } = await supabase
+          .from('allocations')
+          .insert({
+            resource_id: selectedResourceId,
+            task_id: task.id,
+            priority: priority,
+            start_date: task.start_date,
+            end_date: task.end_date,
+            allocated_minutes: allocationType === 'partial' ? allocatedMinutes : null,
+            overtime_minutes: hasOvertime ? overtimeMinutes : 0,
+            overtime_multiplier: hasOvertime ? overtimeMultiplier : 1.5
+          })
+
+        error = insertError
+      }
 
       if (error) throw error
 
-      showSuccessAlert('Recurso alocado com sucesso!')
+      // Atualizar custo real da tarefa
+      await updateTaskActualCost(task.id)
+
+      showSuccessAlert(allocationId ? 'Alocação atualizada com sucesso!' : 'Recurso alocado com sucesso!')
 
       // Reset form
       setSelectedResourceId('')
@@ -128,6 +368,7 @@ export default function AllocationModal({
     setIsSaving(true)
 
     try {
+      // ONDA 3: Include allocated_minutes + overtime_minutes + overtime_multiplier
       const { error } = await supabase
         .from('allocations')
         .insert({
@@ -135,10 +376,16 @@ export default function AllocationModal({
           task_id: task.id,
           priority: priority,
           start_date: task.start_date,
-          end_date: task.end_date
+          end_date: task.end_date,
+          allocated_minutes: allocationType === 'partial' ? allocatedMinutes : null,
+          overtime_minutes: hasOvertime ? overtimeMinutes : 0,
+          overtime_multiplier: hasOvertime ? overtimeMultiplier : 1.5
         })
 
       if (error) throw error
+
+      // Atualizar custo real da tarefa
+      await updateTaskActualCost(task.id)
 
       showSuccessAlert('Recurso alocado com prioridade diferenciada!')
 
@@ -163,6 +410,418 @@ export default function AllocationModal({
     } finally {
       setIsSaving(false)
     }
+  }
+
+  /**
+   * ONDA 3: Lidar com a decisão do usuário no modal de hora extra
+   */
+  async function handleOvertimeDecision(option: OvertimeOption) {
+    if (!pendingAllocation) return
+    if (!overflowResult) {
+      console.error('[OVERFLOW-DEBUG] overflowResult não encontrado!')
+      return
+    }
+
+    setShowOvertimeDecisionModal(false)
+    setIsSaving(true)
+
+    try {
+      const { resourceId, priority, allocationType, allocatedMinutes } = pendingAllocation
+
+      let allocationData: any = {
+        resource_id: resourceId,
+        task_id: task.id,
+        priority: priority,
+        start_date: task.start_date,
+        end_date: task.end_date,
+        allocated_minutes: allocationType === 'partial' ? allocatedMinutes : null,
+        overtime_minutes: 0,
+        overtime_multiplier: 1.5
+      }
+
+      // Aplicar a opção escolhida
+      console.log('[OVERFLOW-DEBUG] Aplicando opção:', option.type)
+
+      switch (option.type) {
+        case 'push_date':
+          // Empurrar para próximo dia (sem hora extra)
+          // IMPORTANTE: Criar 2 alocações - uma no dia atual (capacidade disponível) + uma no próximo dia (resto)
+          console.log('[OVERFLOW-DEBUG] Push date:', {
+            oldDate: task.end_date,
+            newDate: option.newEndDate,
+            minutesAvailable: overflowResult?.minutesAvailable,
+            minutesOverflow: overflowResult?.minutesOverflow
+          })
+
+          if (!overflowResult) {
+            throw new Error('overflowResult não encontrado para push_date')
+          }
+
+          // Se há capacidade disponível no dia atual, criar alocação para usar essa capacidade
+          if (overflowResult.minutesAvailable > 0) {
+            console.log('[OVERFLOW-DEBUG] Criando alocação 1/2 (dia atual):', {
+              date: task.start_date,
+              minutes: overflowResult.minutesAvailable
+            })
+
+            const { error: firstAllocError } = await supabase
+              .from('allocations')
+              .insert({
+                resource_id: resourceId,
+                task_id: task.id,
+                priority: priority,
+                start_date: task.start_date,
+                end_date: task.start_date,
+                allocated_minutes: overflowResult.minutesAvailable,
+                overtime_minutes: 0,
+                overtime_multiplier: 1.0
+              })
+
+            if (firstAllocError) {
+              console.error('[OVERFLOW-DEBUG] Erro ao criar primeira alocação:', firstAllocError)
+              throw firstAllocError
+            }
+
+            console.log('[OVERFLOW-DEBUG] Primeira alocação criada com sucesso!')
+          }
+
+          // Segunda alocação: resto no próximo dia
+          console.log('[OVERFLOW-DEBUG] Criando alocação 2/2 (próximo dia):', {
+            date: option.newEndDate,
+            minutes: overflowResult.minutesOverflow
+          })
+
+          allocationData.start_date = option.newEndDate
+          allocationData.end_date = option.newEndDate
+          allocationData.allocated_minutes = overflowResult.minutesOverflow
+
+          // IMPORTANTE: Atualizar a data de fim da tarefa também!
+          console.log('[OVERFLOW-DEBUG] Atualizando data de fim da tarefa...')
+          const { error: taskUpdateError } = await supabase
+            .from('tasks')
+            .update({ end_date: option.newEndDate })
+            .eq('id', task.id)
+
+          if (taskUpdateError) {
+            console.error('[OVERFLOW-DEBUG] Erro ao atualizar tarefa:', taskUpdateError)
+            throw taskUpdateError
+          }
+          console.log('[OVERFLOW-DEBUG] Tarefa atualizada com sucesso!')
+          break
+
+        case 'overtime_weekday':
+          // Usar hora extra em dia útil (1.5×) - COM LIMITE CLT DE 2H
+          const MAX_OVERTIME_WEEKDAY_MINUTES = 120
+          const totalOverflow = overflowResult.minutesOverflow
+          const overtimeToday = Math.min(totalOverflow, MAX_OVERTIME_WEEKDAY_MINUTES)
+          const exceededOvertime = totalOverflow - overtimeToday
+
+          console.log('[OVERFLOW-DEBUG] Overtime weekday com limite CLT:', {
+            totalOverflow,
+            overtimeToday,
+            exceededOvertime,
+            multiplier: option.multiplier
+          })
+
+          // Primeira alocação: capacidade disponível hoje + hora extra (max 2h)
+          allocationData.allocated_minutes = overflowResult.minutesAvailable
+          allocationData.overtime_minutes = overtimeToday
+          allocationData.overtime_multiplier = 1.5
+
+          // Se há excedente além das 2h, criar segunda alocação no próximo dia
+          if (exceededOvertime > 0) {
+            console.log('[OVERFLOW-DEBUG] Excedente de', exceededOvertime, 'minutos será alocado no próximo dia')
+
+            // Calcular próximo dia útil
+            const nextDay = new Date(task.start_date + 'T00:00:00')
+            nextDay.setDate(nextDay.getDate() + 1)
+            while ([0, 6].includes(nextDay.getDay())) {
+              nextDay.setDate(nextDay.getDate() + 1)
+            }
+            const nextDayStr = nextDay.toISOString().split('T')[0]
+
+            // Atualizar end_date da tarefa
+            const { error: taskUpdateError } = await supabase
+              .from('tasks')
+              .update({ end_date: nextDayStr })
+              .eq('id', task.id)
+
+            if (taskUpdateError) throw taskUpdateError
+
+            // Marcar que haverá segunda alocação (será criada após a primeira)
+            allocationData._createSecondAllocation = {
+              date: nextDayStr,
+              minutes: exceededOvertime
+            }
+          }
+
+          console.log('[OVERFLOW-DEBUG] Alocação configurada:', allocationData)
+          break
+
+        case 'overtime_weekend':
+          // Trabalhar no fim de semana (2.0×)
+          console.log('[OVERFLOW-DEBUG] Overtime weekend:', {
+            overtimeMinutes: option.overtimeMinutes,
+            multiplier: option.multiplier,
+            newDate: option.newEndDate
+          })
+          allocationData.overtime_minutes = option.overtimeMinutes
+          allocationData.overtime_multiplier = option.multiplier
+
+          if (option.newEndDate) {
+            allocationData.start_date = option.newEndDate
+            allocationData.end_date = option.newEndDate
+
+            // IMPORTANTE: Atualizar a data de fim da tarefa para o fim de semana
+            console.log('[OVERFLOW-DEBUG] Atualizando data de fim da tarefa para fim de semana...')
+            const { error: taskUpdateError2 } = await supabase
+              .from('tasks')
+              .update({ end_date: option.newEndDate })
+              .eq('id', task.id)
+
+            if (taskUpdateError2) {
+              console.error('[OVERFLOW-DEBUG] Erro ao atualizar tarefa:', taskUpdateError2)
+              throw taskUpdateError2
+            }
+            console.log('[OVERFLOW-DEBUG] Tarefa atualizada para fim de semana:', option.newEndDate)
+          }
+          break
+      }
+
+      console.log('[OVERFLOW-DEBUG] Dados da alocação:', allocationData)
+
+      // Verificar se há segunda alocação pendente (limite CLT)
+      const secondAllocationData = allocationData._createSecondAllocation
+      delete allocationData._createSecondAllocation // Remover flag temporária
+
+      // Inserir alocação com configuração escolhida
+      // NOTA: Para push_date, a segunda alocação já foi configurada acima
+      // Para overtime, inserir a alocação única com hora extra
+      if (option.type !== 'push_date') {
+        const { error } = await supabase
+          .from('allocations')
+          .insert(allocationData)
+
+        if (error) throw error
+
+        console.log('[OVERFLOW-DEBUG] Alocação criada com sucesso!')
+
+        // Se há segunda alocação (excedente CLT), criar agora
+        if (secondAllocationData) {
+          console.log('[OVERFLOW-DEBUG] Criando segunda alocação (excedente CLT):', secondAllocationData)
+
+          const { error: secondError } = await supabase
+            .from('allocations')
+            .insert({
+              resource_id: pendingAllocation.resourceId,
+              task_id: task.id,
+              priority: pendingAllocation.priority,
+              start_date: secondAllocationData.date,
+              end_date: secondAllocationData.date,
+              allocated_minutes: secondAllocationData.minutes,
+              overtime_minutes: 0,
+              overtime_multiplier: 1.0
+            })
+
+          if (secondError) throw secondError
+
+          console.log('[OVERFLOW-DEBUG] Segunda alocação (excedente) criada com sucesso!')
+        }
+      } else {
+        // Para push_date, inserir apenas a segunda alocação (primeira já foi criada no switch)
+        const { error } = await supabase
+          .from('allocations')
+          .insert(allocationData)
+
+        if (error) throw error
+
+        console.log('[OVERFLOW-DEBUG] Segunda alocação criada com sucesso!')
+      }
+
+      // Atualizar custo real da tarefa
+      await updateTaskActualCost(task.id)
+
+      const message = option.type === 'push_date'
+        ? 'Recurso alocado para o próximo dia útil!'
+        : option.type === 'overtime_weekday'
+        ? 'Recurso alocado com hora extra em dia útil!'
+        : 'Recurso alocado para trabalho no fim de semana!'
+
+      showSuccessAlert(message)
+
+      // Reset form
+      setSelectedResourceId('')
+      setPriority('media')
+      setPendingAllocation(null)
+      setOverflowResult(null)
+      setOvertimeOptions([])
+      setSelectedResourceForModal(null)
+
+      // Refresh global allocations
+      await refreshAllocations()
+      onSuccess()
+    } catch (error: any) {
+      if (error.code === '23505') {
+        alert('Esta pessoa já está alocada nesta tarefa')
+      } else {
+        logError(error, 'handleOvertimeDecision')
+        showErrorAlert(error, ErrorContext.ALLOCATION_CREATE)
+      }
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  /**
+   * Cancelar decisão de hora extra
+   */
+  function handleCancelOvertimeDecision() {
+    setShowOvertimeDecisionModal(false)
+    setPendingAllocation(null)
+    setOverflowResult(null)
+    setOvertimeOptions([])
+    setSelectedResourceForModal(null)
+    setIsSaving(false)
+  }
+
+  /**
+   * ONDA 3.5: Processar decisões do modal multi-dia
+   */
+  async function handleMultiDayDecisions(decisions: DayDecision[]) {
+    console.log('[MULTI-DAY-DEBUG] Decisões recebidas:', decisions)
+
+    if (!pendingAllocation || !multiDayPlan || !selectedResourceForModal) {
+      console.error('[MULTI-DAY-DEBUG] Dados pendentes não encontrados!')
+      return
+    }
+
+    setShowMultiDayModal(false)
+    setIsSaving(true)
+
+    try {
+      const { resourceId, priority } = pendingAllocation
+
+      // Recalcular plano com as decisões do usuário
+      const decisionsMap = new Map(decisions.map(d => [d.date, d]))
+
+      // Para cada dia do plano, criar alocação
+      const allocationsToCreate: any[] = []
+      let remainingMinutes = pendingAllocation.allocatedMinutes
+      const dailyCapacity = selectedResourceForModal.daily_capacity_minutes || 540
+
+      console.log('[MULTI-DAY-DEBUG] Criando alocações para', remainingMinutes, 'minutos totais')
+      console.log('[MULTI-DAY-DEBUG] Plano tem', multiDayPlan.days.length, 'dias')
+      console.log('[MULTI-DAY-DEBUG] Decisões recebidas:', Array.from(decisionsMap.entries()))
+
+      // IMPORTANTE: Iterar sobre TODOS os dias do plano (não só os com overflow)
+      for (const day of multiDayPlan.days) {
+        if (remainingMinutes <= 0) {
+          console.log('[MULTI-DAY-DEBUG] Sem minutos restantes, parando')
+          break
+        }
+
+        const decision = decisionsMap.get(day.date)
+
+        let normalMinutes = 0
+        let overtimeMinutes = 0
+        let overtimeMultiplier = 1.0
+
+        // Calcular minutos para este dia
+        if (day.hasOverflow) {
+          // Dia com overflow - verificar decisão do usuário
+          if (decision?.useOvertime) {
+            // Usuário escolheu usar hora extra
+            normalMinutes = Math.min(remainingMinutes, day.normalMinutes)
+            overtimeMinutes = Math.min(decision.overtimeMinutes, remainingMinutes - normalMinutes)
+            overtimeMultiplier = decision.overtimeMultiplier
+            remainingMinutes -= (normalMinutes + overtimeMinutes)
+          } else {
+            // Usuário escolheu empurrar - alocar apenas capacidade normal
+            normalMinutes = Math.min(remainingMinutes, day.normalMinutes)
+            remainingMinutes -= normalMinutes
+          }
+        } else {
+          // Dia sem overflow - alocar tudo que cabe (dias finais)
+          normalMinutes = Math.min(remainingMinutes, dailyCapacity)
+          remainingMinutes -= normalMinutes
+        }
+
+        console.log('[MULTI-DAY-DEBUG] Dia', day.date, {
+          hasOverflow: day.hasOverflow,
+          normalMinutes,
+          overtimeMinutes,
+          overtimeMultiplier,
+          remainingMinutes,
+          decision: decision ? 'sim' : 'não'
+        })
+
+        // Criar alocação (mesmo que seja zero, para manter consistência)
+        if (normalMinutes > 0 || overtimeMinutes > 0) {
+          allocationsToCreate.push({
+            resource_id: resourceId,
+            task_id: task.id,
+            priority,
+            start_date: day.date,
+            end_date: day.date,
+            allocated_minutes: normalMinutes,
+            overtime_minutes: overtimeMinutes,
+            overtime_multiplier: overtimeMultiplier
+          })
+        }
+      }
+
+      // Inserir todas as alocações
+      console.log('[MULTI-DAY-DEBUG] Inserindo', allocationsToCreate.length, 'alocações')
+      const { error } = await supabase
+        .from('allocations')
+        .insert(allocationsToCreate)
+
+      if (error) throw error
+
+      // Atualizar end_date da tarefa se necessário
+      const lastAllocation = allocationsToCreate[allocationsToCreate.length - 1]
+      if (lastAllocation && lastAllocation.end_date !== task.end_date) {
+        const { error: taskError } = await supabase
+          .from('tasks')
+          .update({ end_date: lastAllocation.end_date })
+          .eq('id', task.id)
+
+        if (taskError) throw taskError
+      }
+
+      // Atualizar custo real da tarefa
+      await updateTaskActualCost(task.id)
+
+      showSuccessAlert(`${allocationsToCreate.length} alocações criadas com sucesso!`)
+
+      // Reset
+      setSelectedResourceId('')
+      setPriority('media')
+      setPendingAllocation(null)
+      setMultiDayPlan(null)
+      setSelectedResourceForModal(null)
+      setShowMultiDayModal(false)
+
+      // Refresh
+      await refreshAllocations()
+      onSuccess()
+    } catch (error: any) {
+      console.error('[MULTI-DAY-DEBUG] Erro ao criar alocações:', error)
+      showErrorAlert('Erro ao criar alocações multi-dia')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  /**
+   * ONDA 3.5: Cancelar modal multi-dia
+   */
+  function handleCancelMultiDayDecision() {
+    setShowMultiDayModal(false)
+    setPendingAllocation(null)
+    setMultiDayPlan(null)
+    setSelectedResourceForModal(null)
+    setIsSaving(false)
   }
 
   async function handleRemoveAllocation(allocationId: string) {
@@ -249,14 +908,49 @@ export default function AllocationModal({
     }))
     .filter(a => a.resource)
 
+  // Debug: Log quando o modal deveria aparecer mas o recurso não foi encontrado
+  if (showOvertimeDecisionModal && !selectedResourceForModal) {
+    console.error('[OVERFLOW-DEBUG] ❌ Modal deveria abrir mas recurso não foi encontrado:', {
+      selectedResourceId,
+      totalResources: allResources.length,
+      resourceIds: allResources.map(r => r.id),
+      selectedResourceForModalState: selectedResourceForModal
+    })
+  }
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+    <>
+      {/* ONDA 3: Modal de Decisão de Hora Extra (single day) */}
+      {showOvertimeDecisionModal && overflowResult && overtimeOptions.length > 0 && selectedResourceForModal && (
+        <OvertimeDecisionModal
+          isOpen={showOvertimeDecisionModal}
+          resource={selectedResourceForModal}
+          overflow={overflowResult}
+          options={overtimeOptions}
+          onSelect={handleOvertimeDecision}
+          onCancel={handleCancelOvertimeDecision}
+        />
+      )}
+
+      {/* ONDA 3.5: Modal de Alocação Multi-Dia Recursiva */}
+      {showMultiDayModal && multiDayPlan && selectedResourceForModal && (
+        <MultiDayAllocationModal
+          plan={multiDayPlan}
+          resourceName={selectedResourceForModal.name}
+          resourceHourlyRate={selectedResourceForModal.hourly_rate || 0}
+          taskName={task.name}
+          onConfirm={handleMultiDayDecisions}
+          onCancel={handleCancelMultiDayDecision}
+        />
+      )}
+
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b sticky top-0 bg-white z-10">
           <div>
             <h3 className="text-xl font-bold text-gray-900">
-              👥 Alocar Pessoa
+              {allocationId ? '✏️ Editar Alocação' : '👥 Alocar Pessoa'}
             </h3>
             <p className="text-sm text-gray-600 mt-1">
               Tarefa: {task.name}
@@ -334,7 +1028,7 @@ export default function AllocationModal({
                 </div>
               )}
 
-              {/* Seleção de Tipo (Líder ou Operador) */}
+              {/* Seleção de Tipo (Líder ou Operador) - ONDA 3: Desabilitar em modo de edição */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Tipo de Recurso
@@ -345,8 +1039,11 @@ export default function AllocationModal({
                       setSelectedRole('lider')
                       setSelectedResourceId('')
                     }}
+                    disabled={!!allocationId}
                     className={`p-3 rounded-lg border-2 transition-all ${
-                      selectedRole === 'lider'
+                      allocationId
+                        ? 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-60'
+                        : selectedRole === 'lider'
                         ? 'border-blue-500 bg-blue-50 text-blue-700'
                         : 'border-gray-200 hover:border-gray-300 text-gray-700'
                     }`}
@@ -361,12 +1058,12 @@ export default function AllocationModal({
                       setSelectedRole('operador')
                       setSelectedResourceId('')
                     }}
-                    disabled={allEffectiveLeaders.length === 0}
+                    disabled={allEffectiveLeaders.length === 0 || !!allocationId}
                     className={`p-3 rounded-lg border-2 transition-all ${
-                      selectedRole === 'operador'
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : allEffectiveLeaders.length === 0
+                      allocationId || allEffectiveLeaders.length === 0
                         ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : selectedRole === 'operador'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
                         : 'border-gray-200 hover:border-gray-300 text-gray-700'
                     }`}
                   >
@@ -397,7 +1094,8 @@ export default function AllocationModal({
                         <select
                           value={selectedResourceId}
                           onChange={(e) => setSelectedResourceId(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          disabled={!!allocationId}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                         >
                           <option value="">Escolha um líder...</option>
                           {availableLeaders.map(resource => (
@@ -406,6 +1104,11 @@ export default function AllocationModal({
                             </option>
                           ))}
                         </select>
+                        {allocationId && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            ℹ️ O recurso não pode ser alterado durante a edição
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -437,7 +1140,11 @@ export default function AllocationModal({
                               {operators.map(operator => (
                                 <label
                                   key={operator.id}
-                                  className={`flex items-center p-2 rounded cursor-pointer transition-colors ${
+                                  className={`flex items-center p-2 rounded transition-colors ${
+                                    allocationId
+                                      ? 'cursor-not-allowed opacity-50'
+                                      : 'cursor-pointer'
+                                  } ${
                                     selectedResourceId === operator.id
                                       ? 'bg-blue-100 border-blue-300 border-2'
                                       : 'bg-white border border-gray-200 hover:bg-gray-50'
@@ -449,6 +1156,7 @@ export default function AllocationModal({
                                     value={operator.id}
                                     checked={selectedResourceId === operator.id}
                                     onChange={(e) => setSelectedResourceId(e.target.value)}
+                                    disabled={!!allocationId}
                                     className="mr-3"
                                   />
                                   <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 font-medium mr-2">
@@ -495,7 +1203,266 @@ export default function AllocationModal({
                 </div>
               )}
 
+              {/* ONDA 3: Tipo de Alocação (Completa ou Parcial) */}
+              {selectedResourceId && (
+                <div className="mt-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Tipo de Alocação
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setAllocationType('full')}
+                      className={`p-4 border-2 rounded-lg text-left transition-all ${
+                        allocationType === 'full'
+                          ? 'border-purple-600 bg-purple-50 shadow-md'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className={`font-semibold text-sm ${
+                        allocationType === 'full' ? 'text-purple-900' : 'text-gray-700'
+                      }`}>
+                        📋 Completa (100%)
+                      </div>
+                      <div className="text-xs mt-1 text-gray-600">
+                        Recurso trabalha toda a duração da tarefa
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAllocationType('partial')}
+                      className={`p-4 border-2 rounded-lg text-left transition-all ${
+                        allocationType === 'partial'
+                          ? 'border-orange-600 bg-orange-50 shadow-md'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <div className={`font-semibold text-sm ${
+                        allocationType === 'partial' ? 'text-orange-900' : 'text-gray-700'
+                      }`}>
+                        ⏱️ Parcial
+                      </div>
+                      <div className="text-xs mt-1 text-gray-600">
+                        Definir minutos específicos
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Input para minutos específicos (alocação parcial) */}
+                  {allocationType === 'partial' && (
+                    <div className="mt-4 p-4 bg-orange-50 border-2 border-orange-200 rounded-lg">
+                      <label className="block text-sm font-medium text-orange-900 mb-2">
+                        Minutos Alocados
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="number"
+                          min="1"
+                          max={task.duration_minutes}
+                          value={allocatedMinutes}
+                          onChange={(e) => setAllocatedMinutes(parseInt(e.target.value) || 0)}
+                          className="flex-1 px-3 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 text-gray-900"
+                          placeholder="Ex: 240"
+                        />
+                        <span className="text-sm text-orange-700 font-mono whitespace-nowrap">
+                          = {(allocatedMinutes / 60).toFixed(1)}h
+                        </span>
+                      </div>
+                      <div className="mt-2 text-xs text-orange-700">
+                        <p>
+                          Duração total da tarefa: <span className="font-mono">{formatMinutes(task.duration_minutes, 'auto')}</span>
+                        </p>
+                        <p className="mt-1">
+                          Alocando: <span className="font-mono font-semibold">
+                            {task.duration_minutes > 0 ? Math.round((allocatedMinutes / task.duration_minutes) * 100) : 0}%
+                          </span> da tarefa
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ONDA 3: Hora Extra */}
+              {selectedResourceId && (
+                <div className="mt-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Hora Extra
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setHasOvertime(!hasOvertime)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                        hasOvertime
+                          ? 'bg-red-100 text-red-700 border-2 border-red-300'
+                          : 'bg-gray-100 text-gray-600 border-2 border-gray-200'
+                      }`}
+                    >
+                      {hasOvertime ? '✓ Ativado' : 'Desativado'}
+                    </button>
+                  </div>
+
+                  {hasOvertime && (
+                    <div className="p-4 bg-red-50 border-2 border-red-200 rounded-lg space-y-4">
+                      {/* Minutos de hora extra */}
+                      <div>
+                        <label className="block text-sm font-medium text-red-900 mb-2">
+                          Minutos de Hora Extra
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="number"
+                            min="0"
+                            value={overtimeMinutes}
+                            onChange={(e) => setOvertimeMinutes(parseInt(e.target.value) || 0)}
+                            className="flex-1 px-3 py-2 border border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 text-gray-900"
+                            placeholder="Ex: 120"
+                          />
+                          <span className="text-sm text-red-700 font-mono whitespace-nowrap">
+                            = {(overtimeMinutes / 60).toFixed(1)}h
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Multiplicador de hora extra */}
+                      <div>
+                        <label className="block text-sm font-medium text-red-900 mb-2">
+                          Multiplicador
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setOvertimeMultiplier(1.5)}
+                            className={`px-3 py-2 border-2 rounded-lg text-sm font-semibold transition-all ${
+                              overtimeMultiplier === 1.5
+                                ? 'border-red-600 bg-red-100 text-red-900'
+                                : 'border-gray-300 hover:border-red-300 text-gray-700'
+                            }`}
+                          >
+                            50% (×1.5)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOvertimeMultiplier(2.0)}
+                            className={`px-3 py-2 border-2 rounded-lg text-sm font-semibold transition-all ${
+                              overtimeMultiplier === 2.0
+                                ? 'border-red-600 bg-red-100 text-red-900'
+                                : 'border-gray-300 hover:border-red-300 text-gray-700'
+                            }`}
+                          >
+                            100% (×2.0)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOvertimeMultiplier(2.5)}
+                            className={`px-3 py-2 border-2 rounded-lg text-sm font-semibold transition-all ${
+                              overtimeMultiplier === 2.5
+                                ? 'border-red-600 bg-red-100 text-red-900'
+                                : 'border-gray-300 hover:border-red-300 text-gray-700'
+                            }`}
+                          >
+                            150% (×2.5)
+                          </button>
+                        </div>
+                        <p className="text-xs text-red-700 mt-2">
+                          Hora extra será cobrada a {formatCurrency(
+                            (selectedResourceId && allResources.find(r => r.id === selectedResourceId)?.hourly_rate || 0) * overtimeMultiplier
+                          )}/hora
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Info sobre as datas */}
+              {/* Preview de duração para o recurso selecionado */}
+              {selectedResourceId && task.duration_minutes && (() => {
+                const selectedResource = allResources.find(r => r.id === selectedResourceId)
+                if (!selectedResource) return null
+
+                const dailyCapacity = selectedResource.daily_capacity_minutes || 540
+                const daysNeeded = Math.ceil((task.duration_minutes / dailyCapacity) * 10) / 10
+
+                return (
+                  <div className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <div className="text-3xl">📊</div>
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-purple-900 mb-2">
+                          Estimativa para este recurso
+                        </h4>
+                        <div className="space-y-1.5 text-sm">
+                          <p className="text-gray-700">
+                            <span className="font-medium text-purple-700">
+                              {selectedResource.name}
+                            </span>{' '}
+                            trabalha{' '}
+                            <span className="font-mono bg-white px-2 py-0.5 rounded border border-purple-200">
+                              {dailyCapacity / 60}h/dia
+                            </span>
+                          </p>
+                          <p className="text-gray-700">
+                            Esta tarefa de{' '}
+                            <span className="font-mono bg-white px-2 py-0.5 rounded border border-purple-200">
+                              {formatMinutes(task.duration_minutes, 'auto')}
+                            </span>{' '}
+                            levará aproximadamente:
+                          </p>
+                          <p className="text-lg font-bold text-purple-900 mt-2">
+                            ⏱️ {daysNeeded} dia(s) útil(eis)
+                          </p>
+
+                          {/* Cálculo de Custo - ONDA 3: Com hora extra */}
+                          {selectedResource.hourly_rate && selectedResource.hourly_rate > 0 && (() => {
+                            const effectiveMinutes = allocationType === 'partial' ? allocatedMinutes : task.duration_minutes
+                            const totalCost = calculateResourceCost(
+                              task.duration_minutes,
+                              selectedResource.hourly_rate,
+                              allocationType === 'partial' ? allocatedMinutes : null,
+                              hasOvertime ? overtimeMinutes : 0,
+                              overtimeMultiplier
+                            )
+
+                            const regularCost = (effectiveMinutes / 60) * selectedResource.hourly_rate
+                            const overtimeCost = hasOvertime ? (overtimeMinutes / 60) * selectedResource.hourly_rate * overtimeMultiplier : 0
+
+                            return (
+                              <>
+                                <div className="border-t border-purple-200 my-2"></div>
+                                <p className="text-gray-700">
+                                  <span className="font-medium text-purple-700">Custo deste recurso:</span>
+                                </p>
+                                <p className="text-lg font-bold text-green-700 mt-1">
+                                  💰 {formatCurrency(totalCost)}
+                                </p>
+
+                                {/* Breakdown de custo */}
+                                <div className="text-xs text-gray-600 mt-2 space-y-1">
+                                  <p>
+                                    {allocationType === 'partial'
+                                      ? `${(allocatedMinutes / 60).toFixed(1)}h (${Math.round((allocatedMinutes / task.duration_minutes) * 100)}% da tarefa)`
+                                      : `${(task.duration_minutes / 60).toFixed(1)}h (100% da tarefa)`
+                                    } × {formatCurrency(selectedResource.hourly_rate)}/h = {formatCurrency(regularCost)}
+                                  </p>
+                                  {hasOvertime && overtimeMinutes > 0 && (
+                                    <p className="text-red-700 font-semibold">
+                                      + {(overtimeMinutes / 60).toFixed(1)}h extra × {formatCurrency(selectedResource.hourly_rate * overtimeMultiplier)}/h = {formatCurrency(overtimeCost)}
+                                    </p>
+                                  )}
+                                </div>
+                              </>
+                            )
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+
               {task.start_date && task.end_date && selectedResourceId && (
                 <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
                   ℹ️ Esta alocação usará as datas da tarefa:
@@ -641,10 +1608,14 @@ export default function AllocationModal({
             disabled={!selectedResourceId || isSaving}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
-            {isSaving ? 'Alocando...' : '✓ Alocar Pessoa'}
+            {isSaving
+              ? (allocationId ? 'Salvando...' : 'Alocando...')
+              : (allocationId ? '✓ Salvar Alterações' : '✓ Alocar Pessoa')
+            }
           </button>
         </div>
       </div>
     </div>
+    </>
   )
 }

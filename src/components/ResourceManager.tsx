@@ -269,6 +269,8 @@ function ResourceDetailsPanel({
   const [editedHierarchy, setEditedHierarchy] = useState<'gerente' | 'lider' | 'operador'>(resource?.hierarchy || 'operador')
   const [editedRole, setEditedRole] = useState(resource?.role || '')
   const [editedLeaderId, setEditedLeaderId] = useState<string | null>(resource?.leader_id || null)
+  const [editedHourlyRate, setEditedHourlyRate] = useState(resource?.hourly_rate || 0)
+  const [editedDailyCapacity, setEditedDailyCapacity] = useState(resource?.daily_capacity_minutes || 540)
   const [isSaving, setIsSaving] = useState(false)
 
   // Atualizar estado quando mudar de recurso
@@ -276,8 +278,10 @@ function ResourceDetailsPanel({
     setEditedHierarchy(resource?.hierarchy || 'operador')
     setEditedRole(resource?.role || '')
     setEditedLeaderId(resource?.leader_id || null)
+    setEditedHourlyRate(resource?.hourly_rate || 0)
+    setEditedDailyCapacity(resource?.daily_capacity_minutes || 540)
     setIsEditing(false)
-  }, [resourceId, resource?.hierarchy, resource?.role, resource?.leader_id])
+  }, [resourceId, resource?.hierarchy, resource?.role, resource?.leader_id, resource?.hourly_rate, resource?.daily_capacity_minutes])
 
   if (!resource) return null
 
@@ -292,21 +296,45 @@ function ResourceDetailsPanel({
     try {
       const { supabase } = await import('@/lib/supabase')
 
+      // Verificar se hourly_rate ou daily_capacity_minutes mudaram
+      const hourlyRateChanged = editedHourlyRate !== resource.hourly_rate
+      const capacityChanged = editedDailyCapacity !== resource.daily_capacity_minutes
+
       const { error } = await supabase
         .from('resources')
         .update({
           hierarchy: editedHierarchy,
           role: editedRole || null,
           leader_id: editedLeaderId || null,
+          hourly_rate: editedHourlyRate,
+          daily_capacity_minutes: editedDailyCapacity,
         })
         .eq('id', resourceId)
 
       if (error) throw error
 
+      // ONDA 1: Se hourly_rate ou capacity mudou, recalcular custos de todas as tarefas onde este recurso está alocado
+      if (hourlyRateChanged || capacityChanged) {
+        const { updateTaskActualCost } = await import('@/lib/task-cost-service')
+
+        // Buscar todas as tarefas onde este recurso está alocado
+        const resourceAllocations = allocations.filter(a => a.resource_id === resourceId)
+        const taskIds = [...new Set(resourceAllocations.map(a => a.task_id))]
+
+        // Recalcular custo de cada tarefa
+        await Promise.all(
+          taskIds.map(taskId => updateTaskActualCost(taskId))
+        )
+
+        console.log(`✅ Recalculados custos de ${taskIds.length} tarefas após mudança no recurso`)
+      }
+
       // Atualizar o recurso localmente
       resource.hierarchy = editedHierarchy
       resource.role = editedRole || null
       resource.leader_id = editedLeaderId || null
+      resource.hourly_rate = editedHourlyRate
+      resource.daily_capacity_minutes = editedDailyCapacity
 
       setIsEditing(false)
       alert('Alterações salvas com sucesso!')
@@ -326,6 +354,8 @@ function ResourceDetailsPanel({
     setEditedHierarchy(resource.hierarchy || 'operador')
     setEditedRole(resource.role || '')
     setEditedLeaderId(resource.leader_id || null)
+    setEditedHourlyRate(resource.hourly_rate || 0)
+    setEditedDailyCapacity(resource.daily_capacity_minutes || 540)
     setIsEditing(false)
   }
 
@@ -483,6 +513,75 @@ function ResourceDetailsPanel({
               )}
               <p className="text-xs text-gray-500 mt-1">
                 Líder ou gerente responsável por este recurso
+              </p>
+            </div>
+
+            {/* Capacidade Diária */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Capacidade Diária (horas/dia)
+              </label>
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    max="24"
+                    value={(editedDailyCapacity / 60).toFixed(1)}
+                    onChange={(e) => {
+                      const hours = parseFloat(e.target.value) || 0
+                      setEditedDailyCapacity(Math.round(hours * 60))
+                    }}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
+                    disabled={isSaving}
+                  />
+                  <span className="text-gray-600 text-sm">horas/dia</span>
+                  <span className="text-gray-400 text-xs">({editedDailyCapacity} min)</span>
+                </div>
+              ) : (
+                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">
+                  {((resource.daily_capacity_minutes || 540) / 60).toFixed(1)} horas/dia
+                  <span className="text-gray-500 text-sm ml-2">({resource.daily_capacity_minutes || 540} minutos)</span>
+                </div>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Quantas horas por dia este recurso pode trabalhar (ex: 9h = jornada padrão)
+              </p>
+            </div>
+
+            {/* Valor por Hora */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Valor por Hora (R$/h)
+              </label>
+              {isEditing ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-600">R$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editedHourlyRate}
+                    onChange={(e) => setEditedHourlyRate(parseFloat(e.target.value) || 0)}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900 bg-white"
+                    disabled={isSaving}
+                    placeholder="0.00"
+                  />
+                  <span className="text-gray-600">/hora</span>
+                </div>
+              ) : (
+                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-gray-900">
+                  R$ {(resource.hourly_rate || 0).toFixed(2)}/hora
+                  {(resource.hourly_rate || 0) > 0 && (resource.daily_capacity_minutes || 540) > 0 && (
+                    <span className="text-gray-500 text-sm ml-2">
+                      (Custo diário máximo: R$ {(((resource.hourly_rate || 0) * (resource.daily_capacity_minutes || 540)) / 60).toFixed(2)})
+                    </span>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                Custo por hora deste recurso. Usado para calcular o custo real das tarefas.
               </p>
             </div>
 

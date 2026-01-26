@@ -6,6 +6,7 @@ import { Task } from '@/types/database.types'
 import EditPredecessorModal from '@/components/modals/EditPredecessorModal'
 import { recalculateTasksInCascade } from '@/utils/predecessorCalculations'
 import { wouldCreateCycle } from '@/lib/msproject/validation'
+import { daysToMinutes } from '@/utils/time.utils'
 
 // ============ HELPER FUNCTIONS ============
 
@@ -122,7 +123,7 @@ const [editingPredecessor, setEditingPredecessor] = useState<any>(null)
           task_id: task.id,
           predecessor_id: selectedPredecessor,
           type: convertTypeToDB(relationType), // ✅ converte FS → fim_inicio
-          lag_time: lagDays  // ✅ nome correto da coluna
+          lag_minutes: daysToMinutes(lagDays)  // ONDA 1: Converter lag dias → minutos
         })
 
       if (insertError) throw insertError
@@ -134,7 +135,8 @@ const [editingPredecessor, setEditingPredecessor] = useState<any>(null)
         task_id: task.id,
         predecessor_id: selectedPredecessor,
         type: convertTypeToDB(relationType),
-        lag_time: lagDays
+        lag_minutes: daysToMinutes(lagDays), // ONDA 1: usar lag_minutes
+        lag_time: lagDays // manter para retrocompat (será computed no banco)
       }
 
       // Adicionar ao array de predecessores

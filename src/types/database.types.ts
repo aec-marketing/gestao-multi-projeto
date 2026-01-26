@@ -68,6 +68,8 @@ export type Database = {
           hierarchy: 'gerente' | 'lider' | 'operador'  // Hierarquia funcional (fixa)
           role: string | null  // Função/especialidade - texto livre (visual)
           leader_id: string | null
+          daily_capacity_minutes: number  // Capacidade diária em minutos (padrão: 540 = 9h)
+          hourly_rate: number  // Valor por hora em R$ (padrão: 0.00)
           is_active: boolean
           created_at: string
           updated_at: string
@@ -79,6 +81,8 @@ export type Database = {
           hierarchy: 'gerente' | 'lider' | 'operador'
           role?: string | null
           leader_id?: string | null
+          daily_capacity_minutes?: number  // Padrão: 540 (9h/dia)
+          hourly_rate?: number  // Padrão: 0.00
           is_active?: boolean
         }
         Update: {
@@ -88,6 +92,8 @@ export type Database = {
           hierarchy?: 'gerente' | 'lider' | 'operador'
           role?: string | null
           leader_id?: string | null
+          daily_capacity_minutes?: number
+          hourly_rate?: number
           is_active?: boolean
         }
       }
@@ -98,7 +104,14 @@ export type Database = {
           name: string
           type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa'
           parent_id: string | null
-          duration: number
+
+          // NOVOS CAMPOS - Sistema de Minutos (ONDA 1)
+          duration_minutes: number              // Campo PRINCIPAL (ex: 540 = 1 dia útil)
+          work_type: 'work' | 'wait' | 'milestone'  // Tipo de trabalho
+
+          // CAMPOS LEGADOS (computed/readonly - retrocompatibilidade)
+          duration: number                      // Computed: duration_minutes / 540
+
           start_date: string | null
           end_date: string | null
           is_optional: boolean
@@ -108,6 +121,8 @@ export type Database = {
           sort_order: number
           estimated_cost: number
           actual_cost: number
+          // 🆕 CAMPOS PREPARATÓRIOS (ONDA 3)
+          overtime_allowed: boolean  // Permite hora extra para cumprir prazo
           margin_start: number
           margin_end: number
           outline_level: number | null
@@ -123,7 +138,13 @@ export type Database = {
           name: string
           type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa'
           parent_id?: string | null
-          duration?: number
+
+          // NOVOS CAMPOS (Sistema de Minutos)
+          duration_minutes?: number             // Padrão: 540 (1 dia)
+          work_type?: 'work' | 'wait' | 'milestone'  // Padrão: 'work'
+
+          // duration não é mais inserível (campo computed)
+
           start_date?: string | null
           end_date?: string | null
           is_optional?: boolean
@@ -133,6 +154,7 @@ export type Database = {
           sort_order?: number
           estimated_cost?: number
           actual_cost?: number
+          overtime_allowed?: boolean  // 🆕 ONDA 3: Permite hora extra
           margin_start?: number
           margin_end?: number
           lag_days?: number
@@ -143,7 +165,13 @@ export type Database = {
           name?: string
           type?: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa'
           parent_id?: string | null
-          duration?: number
+
+          // NOVOS CAMPOS (Sistema de Minutos)
+          duration_minutes?: number
+          work_type?: 'work' | 'wait' | 'milestone'
+
+          // duration não é mais editável (campo computed)
+
           start_date?: string | null
           end_date?: string | null
           is_optional?: boolean
@@ -153,6 +181,7 @@ export type Database = {
           sort_order?: number
           estimated_cost?: number
           actual_cost?: number
+          overtime_allowed?: boolean  // 🆕 ONDA 3: Permite hora extra
           margin_start?: number
           margin_end?: number
           outline_level?: number
@@ -191,6 +220,9 @@ export type ProjectCategory = Project['category']
 export type ProjectComplexity = Project['complexity']
 export type ResourceRole = Resource['role']
 export type TaskType = Task['type']
+
+// Tipos para sistema de minutos (ONDA 1)
+export type WorkType = Task['work_type']
 
 
 // Tipos para Import MS Project

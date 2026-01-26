@@ -372,7 +372,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
     }
     
     const colors = {
-      'projeto_mecanico': 'bg-blue-500',
+      'projeto_mecanico': 'bg-yellow-500',
       'projeto_eletrico': 'bg-yellow-500',
       'compras_mecanica': 'bg-green-500',
       'compras_eletrica': 'bg-green-600',

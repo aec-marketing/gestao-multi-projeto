@@ -118,10 +118,19 @@ export function usePendingChanges() {
         } else if (field === 'lag_days') {
           // lag_days é definido diretamente
           taskUpdates[field] = typeof value === 'number' ? value : parseInt(value as string)
-        } else if (field === 'duration' || field === 'start_date' || field === 'end_date') {
-          // Para mudanças de data/duração sem ajuste de lag, aplicar diretamente
-          // (O modal de ajuste já terá calculado os valores corretos)
-          taskUpdates[field] = field === 'duration' ? parseFloat(value as string) : value
+        } else if (field === 'duration') {
+          // ONDA 2: Ignorar campo duration (é computed/readonly)
+          // Usar duration_minutes ao invés
+          continue
+        } else if (field === 'duration_minutes') {
+          // ONDA 2: Campo duration_minutes substituiu duration
+          taskUpdates[field] = typeof value === 'number' ? value : parseInt(value as string)
+        } else if (field === 'work_type') {
+          // ONDA 3: Work type (produção/dependência/checkpoint)
+          taskUpdates[field] = value
+        } else if (field === 'start_date' || field === 'end_date') {
+          // Mudanças de data aplicadas diretamente
+          taskUpdates[field] = value
         }
       }
 

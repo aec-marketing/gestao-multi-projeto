@@ -6,6 +6,7 @@ import {
   DEFAULT_THRESHOLDS
 } from '@/types/allocation.types'
 import { parseLocalDate } from './date.utils'
+import { MINUTES_PER_WORKING_DAY, minutesToHours } from './time.utils'
 
 // Calcular análise de carga de trabalho para um recurso
 export function calculateWorkloadAnalysis(
@@ -23,10 +24,11 @@ export function calculateWorkloadAnalysis(
   const mediumPriorityTasks = resourceAllocations.filter(a => a.priority === 'media').length
   const lowPriorityTasks = resourceAllocations.filter(a => a.priority === 'baixa').length
   
-  // Calcular horas totais (soma das durações das tarefas)
-  const totalHours = resourceAllocations.reduce((sum, allocation) => {
-    return sum + (allocation.task.duration || 0)
+  // ONDA 1: Calcular horas totais usando duration_minutes
+  const totalMinutes = resourceAllocations.reduce((sum, allocation) => {
+    return sum + (allocation.task.duration_minutes ?? MINUTES_PER_WORKING_DAY)
   }, 0)
+  const totalHours = minutesToHours(totalMinutes)
   
   // Calcular horas semanais (aproximação baseada em datas)
   const weeklyHours = calculateWeeklyHours(resourceAllocations)
@@ -70,9 +72,11 @@ function calculateWeeklyHours(allocations: AllocationWithDetails[]): number {
       if (!startDate || !endDate) return
       const durationInDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
       const weeks = Math.max(1, Math.ceil(durationInDays / 7))
-      
-      // Distribuir horas da tarefa pelas semanas
-      const hoursPerWeek = (allocation.task.duration || 0) / weeks
+
+      // ONDA 1: Distribuir horas da tarefa pelas semanas usando duration_minutes
+      const taskMinutes = allocation.task.duration_minutes ?? MINUTES_PER_WORKING_DAY
+      const taskHours = minutesToHours(taskMinutes)
+      const hoursPerWeek = taskHours / weeks
       
       for (let i = 0; i < weeks; i++) {
         const weekKey = getWeekKey(new Date(startDate.getTime() + i * 7 * 24 * 60 * 60 * 1000))

@@ -24,3 +24,51 @@ export interface ResizeState {
 export type ZoomLevel = 'day' | 'week' | 'month'
 
 export type FilterType = 'all' | string
+
+/**
+ * Estado consolidado do Gantt
+ * Centraliza todos os 15+ estados que estavam dispersos no GanttViewTab
+ */
+export interface GanttState {
+  selection: {
+    selectedTask: string | null
+    selectedDay: string | null
+  }
+
+  dragDrop: {
+    draggedTask: string | null
+    dragOverTask: string | null
+  }
+
+  modals: {
+    allocationTask: Task | null
+    subtaskTask: Task | null
+    editingCostsTask: Task | null
+    showRecalculate: boolean
+    showCycleAudit: boolean
+    pendingUpdates: any[]
+  }
+
+  view: {
+    expandedTasks: Set<string>
+    zoomLevel: ZoomLevel
+    sortOrder: 'structural' | 'chronological'
+  }
+
+  filters: {
+    type: string
+    person: string
+    progress: string
+  }
+
+  resize: {
+    resizingTask: ResizeState | null
+    tempDurations: Map<string, number>
+    tempStartOffsets: Map<string, number>
+  }
+
+  data: {
+    predecessors: any[]
+    tasksInCycle: Set<string>
+  }
+}

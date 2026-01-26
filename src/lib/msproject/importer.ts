@@ -3,6 +3,7 @@
 
 import { supabase } from '@/lib/supabase'
 import type { MSProjectTask, UIDMap } from '@/types/database.types'
+import { daysToMinutes } from '@/utils/time.utils'
 
 interface ImportMetadata {
   category: string
@@ -127,6 +128,25 @@ export async function importMSProject(
       const parentOutline = calculateParentOutline(task.outlineNumber)
       const parentId = parentOutline ? outlineToIdMap.get(parentOutline) || null : null
 
+      // Detectar tipo de tarefa e calcular duração
+      let workType: 'work' | 'wait' | 'milestone'
+      let durationMinutes: number
+
+      if (task.duration === 0 && !task.isSummary) {
+        // Tarefa com duração zero E não é summary = MILESTONE real
+        workType = 'milestone'
+        durationMinutes = 0
+      } else if (task.isSummary) {
+        // Tarefa summary (pai) = WORK com duração mínima de 1 min
+        // A duração real será recalculada pela soma das subtarefas
+        workType = 'work'
+        durationMinutes = task.duration > 0 ? daysToMinutes(task.duration) : 1
+      } else {
+        // Tarefa normal = WORK com duração do MS Project
+        workType = 'work'
+        durationMinutes = task.duration > 0 ? daysToMinutes(task.duration) : 1
+      }
+
       // Inserir tarefa
       const { data: insertedTask, error: taskError } = await supabase
         .from('tasks')
@@ -135,7 +155,8 @@ export async function importMSProject(
           name: task.name,
           type: inferTaskType(task.name),
           parent_id: parentId,
-          duration: task.duration,
+          duration_minutes: durationMinutes,
+          work_type: workType,
           start_date: task.start.toISOString(),
           end_date: task.finish.toISOString(),
           progress: task.percentComplete,
@@ -188,7 +209,7 @@ export async function importMSProject(
             task_id: taskId,
             predecessor_id: predecessorId,
             type: mapPredecessorType(pred.type),
-            lag_time: pred.lag
+            lag_minutes: daysToMinutes(pred.lag) // ONDA 1: Converter lag em dias → minutos
           })
 
         if (predError) {
@@ -199,7 +220,55 @@ export async function importMSProject(
       }
     }
 
-    // ========== 5. RETORNAR RESULTADO ==========
+    // ========== 5. RECALCULAR TAREFAS PAI ==========
+    // Após importação, forçar recálculo das tarefas pai (bottom-up)
+    // Buscar todas as tarefas pai ordenadas por outline_level DESC
+    const { data: parentTasks } = await supabase
+      .from('tasks')
+      .select('id, outline_level')
+      .eq('project_id', project.id)
+      .eq('is_summary', true)
+      .order('outline_level', { ascending: false })
+
+    if (parentTasks && parentTasks.length > 0) {
+      for (const parent of parentTasks) {
+        // Buscar min/max datas e soma de duration_minutes dos filhos
+        const { data: children } = await supabase
+          .from('tasks')
+          .select('start_date, end_date, duration_minutes')
+          .eq('parent_id', parent.id)
+
+        if (children && children.length > 0) {
+          const validChildren = children.filter(c => c.start_date && c.end_date)
+
+          if (validChildren.length > 0) {
+            const minStart = validChildren.reduce((min, c) =>
+              c.start_date < min ? c.start_date : min, validChildren[0].start_date)
+            const maxEnd = validChildren.reduce((max, c) =>
+              c.end_date > max ? c.end_date : max, validChildren[0].end_date)
+            const totalDurationMinutes = children.reduce((sum, c) => sum + (c.duration_minutes || 0), 0)
+
+            // Calcular duration em dias
+            const startDate = new Date(minStart)
+            const endDate = new Date(maxEnd)
+            const durationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+
+            // Atualizar tarefa pai
+            await supabase
+              .from('tasks')
+              .update({
+                start_date: minStart,
+                end_date: maxEnd,
+                duration: durationDays,
+                duration_minutes: totalDurationMinutes
+              })
+              .eq('id', parent.id)
+          }
+        }
+      }
+    }
+
+    // ========== 6. RETORNAR RESULTADO ==========
     return {
       projectId: project.id,
       tasksCreated,

@@ -77,7 +77,7 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
       const maxSubtaskDuration = Math.max(...allDurations)
 
       if (maxSubtaskDuration > (parentTask.duration || 0)) {
-        // Atualizar duração e end_date da tarefa pai
+        // Atualizar end_date da tarefa pai (duração é calculada automaticamente)
         if (parentTask.start_date) {
           const newParentEndDate = new Date(parentTask.start_date)
           newParentEndDate.setDate(newParentEndDate.getDate() + maxSubtaskDuration - 1)
@@ -85,17 +85,11 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
           await supabase
             .from('tasks')
             .update({
-              duration: maxSubtaskDuration,
               end_date: newParentEndDate.toISOString().split('T')[0]
             })
             .eq('id', parentTask.id)
-        } else {
-          // Tarefa pai sem data, só atualiza duração
-          await supabase
-            .from('tasks')
-            .update({ duration: maxSubtaskDuration })
-            .eq('id', parentTask.id)
         }
+        // Se não tem start_date, não precisa atualizar nada (duração é computed)
       }
 
       // Buscar alocações de líderes/gerentes da tarefa pai

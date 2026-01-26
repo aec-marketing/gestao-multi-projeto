@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Resource, ProjectInsert } from '@/types/database.types'
 import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
+import { daysToMinutes } from '@/utils/time.utils'
 
 interface NewProjectFormProps {
   onClose: () => void
@@ -187,7 +188,8 @@ export default function NewProjectForm({ onClose, onSuccess }: NewProjectFormPro
             project_id: project.id,
             name: task.name,
             type: task.type as any,
-            duration: task.duration,
+            duration_minutes: daysToMinutes(task.duration), // ONDA 1: Converter dias → minutos
+            work_type: 'work' as const, // ONDA 1: Tipo de trabalho padrão
             sort_order: index + 1,
             is_optional: !task.required
           }))

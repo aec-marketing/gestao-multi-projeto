@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { Database } from '@/types/database.types'
+import { minutesToDays } from '@/utils/time.utils'
 
 interface EditProjectData {
   code?: string
@@ -136,7 +137,7 @@ export async function recalculateProjectEndDate(projectId: string): Promise<Upda
 
     const { data: tasks, error: tasksError } = await supabase
       .from('tasks')
-      .select('id, name, start_date, end_date, duration')
+      .select('id, name, start_date, end_date, duration_minutes')
       .eq('project_id', projectId)
 
     if (tasksError) {
@@ -152,11 +153,12 @@ export async function recalculateProjectEndDate(projectId: string): Promise<Upda
 
         if (task.end_date) {
           taskEndDate = new Date(task.end_date)
-        } else if (task.start_date && task.duration) {
-          // Calcular end_date se não estiver definida
+        } else if (task.start_date && task.duration_minutes != null) {
+          // ONDA 1: Calcular end_date usando duration_minutes
           const taskStartDate = new Date(task.start_date)
           taskEndDate = new Date(taskStartDate)
-          taskEndDate.setDate(taskEndDate.getDate() + Math.ceil(task.duration) - 1)
+          const durationInDays = Math.ceil(minutesToDays(task.duration_minutes))
+          taskEndDate.setDate(taskEndDate.getDate() + durationInDays - 1)
         }
 
         if (taskEndDate && (!latestEndDate || taskEndDate > latestEndDate)) {
