@@ -63,6 +63,26 @@ export interface MultiDayAllocationPlan {
   totalOvertimeMinutes: number
   estimatedCost: number
   requiresUserDecision: boolean // Se há dias com overflow que precisam de decisão
+  requiresWeekendDecision: boolean // 🌊 ONDA 4.1: Se há fins de semana que precisam de decisão
+  weekendsDetected: number // 🌊 ONDA 4.1: Quantidade de fins de semana detectados
+}
+
+/**
+ * 🌊 ONDA 4.2: Interface para decisão de fim de semana
+ */
+export interface WeekendDecision {
+  date: string
+  useWeekend: boolean // true = trabalhar no fim de semana, false = pular
+  minutesToWork: number // Minutos a trabalhar (se useWeekend = true)
+}
+
+/**
+ * 🌊 ONDA 4.2: Informações de um fim de semana que precisa de decisão
+ */
+export interface WeekendDay {
+  date: string
+  dayOfWeek: string // "Sábado" ou "Domingo"
+  remainingMinutes: number // Minutos restantes da tarefa neste ponto
 }
 
 /**
@@ -342,10 +362,14 @@ export function calculateOvertimeCost(
 }
 
 /**
- * ONDA 3.5: Calcula plano de alocação multi-dia RECURSIVO
+ * ONDA 4.1: Calcula plano de alocação multi-dia RECURSIVO com detecção de fins de semana
  *
- * Esta função distribui minutos ao longo de múltiplos dias, detectando overflow
- * em CADA dia e permitindo decisões dia a dia.
+ * Esta função distribui minutos ao longo de múltiplos dias, detectando:
+ * - Overflow em CADA dia (hora extra necessária)
+ * - Fins de semana que cruzam a alocação (precisam de decisão)
+ *
+ * MUDANÇA ONDA 4.1: Agora NÃO pula fins de semana automaticamente.
+ * Em vez disso, detecta e marca como dias que precisam de decisão do usuário.
  *
  * @param totalMinutes - Total de minutos a alocar
  * @param resource - Recurso sendo alocado
@@ -369,7 +393,7 @@ export function calculateMultiDayAllocationPlan(
   existingAllocations: Record<string, number> = {},
   useOvertimeByDefault: boolean = false
 ): MultiDayAllocationPlan {
-  console.log('[MULTI-DAY-DEBUG] Calculando plano multi-dia:', {
+  console.log('[MULTI-DAY-DEBUG] 🌊 ONDA 4.1: Calculando plano multi-dia COM detecção de fins de semana:', {
     totalMinutes,
     resourceName: resource.name,
     startDate,
@@ -384,6 +408,8 @@ export function calculateMultiDayAllocationPlan(
   let remainingMinutes = totalMinutes
   let currentDate = new Date(startDate + 'T00:00:00')
   let requiresUserDecision = false
+  let requiresWeekendDecision = false // 🌊 ONDA 4.1
+  let weekendsDetected = 0 // 🌊 ONDA 4.1
 
   // Limite CLT: 2h por dia em dias úteis
   const MAX_OVERTIME_WEEKDAY_MINUTES = 120
@@ -397,7 +423,7 @@ export function calculateMultiDayAllocationPlan(
     const weekend = isWeekend(currentDate)
     const holiday = isHoliday(currentDate)
 
-    console.log('[MULTI-DAY-DEBUG] Dia:', dateStr, {
+    console.log('[MULTI-DAY-DEBUG] 📅 Dia:', dateStr, {
       remainingMinutes,
       availableCapacity,
       existingMinutes,
@@ -405,12 +431,32 @@ export function calculateMultiDayAllocationPlan(
       isHoliday: holiday
     })
 
+    // 🌊 ONDA 4.1: DETECTAR FIM DE SEMANA (não pular automaticamente!)
+    if (weekend && remainingMinutes > 0) {
+      weekendsDetected++
+      requiresWeekendDecision = true
+      console.log('[WEEKEND-DEBUG] 🏖️ FIM DE SEMANA DETECTADO:', {
+        date: dateStr,
+        remainingMinutes,
+        weekendsDetected
+      })
+    }
+
     // Determinar quantos minutos alocar neste dia
     let normalMinutes = 0
     let overtimeMinutes = 0
     let overtimeMultiplier = 1.0
     let hasOverflow = false
     let overflowMinutes = 0
+
+    // 🌊 ONDA 4.1: Se for fim de semana, NÃO alocar por padrão (usuário decide depois)
+    if (weekend) {
+      // Por padrão, pular fim de semana (usuário pode decidir trabalhar depois)
+      console.log('[WEEKEND-DEBUG] ⏭️ Pulando fim de semana (decisão do usuário necessária)')
+      // Não alocar nada neste dia, avançar para próximo dia
+      currentDate.setDate(currentDate.getDate() + 1)
+      continue
+    }
 
     if (remainingMinutes <= availableCapacity) {
       // Cabe tudo no dia (sem overflow)
@@ -456,7 +502,7 @@ export function calculateMultiDayAllocationPlan(
       overflowMinutes
     })
 
-    console.log('[MULTI-DAY-DEBUG] Dia alocado:', {
+    console.log('[MULTI-DAY-DEBUG] ✅ Dia alocado:', {
       date: dateStr,
       normalMinutes,
       overtimeMinutes,
@@ -466,15 +512,12 @@ export function calculateMultiDayAllocationPlan(
       remainingMinutes
     })
 
-    // Avançar para o próximo dia útil (pular fins de semana)
+    // 🌊 ONDA 4.1: Avançar para o próximo dia (SEM pular fins de semana)
     currentDate.setDate(currentDate.getDate() + 1)
-    while (isWeekend(currentDate)) {
-      currentDate.setDate(currentDate.getDate() + 1)
-    }
 
-    // Segurança: evitar loop infinito (máximo 30 dias)
-    if (days.length > 30) {
-      console.error('[MULTI-DAY-DEBUG] ERRO: Mais de 30 dias necessários!')
+    // Segurança: evitar loop infinito (máximo 60 dias para cobrir fins de semana)
+    if (days.length > 60) {
+      console.error('[MULTI-DAY-DEBUG] ❌ ERRO: Mais de 60 dias necessários!')
       break
     }
   }
@@ -495,10 +538,21 @@ export function calculateMultiDayAllocationPlan(
     totalNormalMinutes,
     totalOvertimeMinutes,
     estimatedCost,
-    requiresUserDecision
+    requiresUserDecision,
+    requiresWeekendDecision, // 🌊 ONDA 4.1
+    weekendsDetected // 🌊 ONDA 4.1
   }
 
-  console.log('[MULTI-DAY-DEBUG] Plano completo:', plan)
+  console.log('[MULTI-DAY-DEBUG] 🎉 Plano completo:', plan)
+
+  // 🌊 ONDA 4.1: Log específico para fins de semana
+  if (requiresWeekendDecision) {
+    console.log('[WEEKEND-DEBUG] 🏖️ RESUMO DE FINS DE SEMANA:', {
+      weekendsDetected,
+      requiresWeekendDecision,
+      message: `${weekendsDetected} fim(ns) de semana detectado(s) - decisão do usuário necessária`
+    })
+  }
 
   return plan
 }

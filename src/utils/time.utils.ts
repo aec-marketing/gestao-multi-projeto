@@ -130,38 +130,39 @@ export function parseTimeInput(input: string): number | null {
  *
  * @param minutes - Número de minutos
  * @param format - Formato de saída: 'auto', 'short', 'long'
+ * @param workType - Tipo de trabalho (afeta cálculo de dias)
+ *                   - 'work': dias úteis (9h/dia = 540 min)
+ *                   - 'wait': dias corridos (24h/dia = 1440 min)
+ *                   - 'milestone': sempre zero
  * @returns String formatada
  *
- * Exemplos (formato 'auto'):
+ * Exemplos (formato 'auto', workType='work'):
  * - 810 → "1.5 dias"
  * - 540 → "1 dia"
  * - 120 → "2h"
- * - 30 → "30min"
- * - 1350 → "2.5 dias"
  *
- * Exemplos (formato 'short'):
- * - 810 → "1.5d"
- * - 120 → "2h"
- * - 30 → "30m"
- *
- * Exemplos (formato 'long'):
- * - 810 → "1 dia e 4 horas e 30 minutos"
- * - 120 → "2 horas"
+ * Exemplos (formato 'short', workType='wait'):
+ * - 1440 → "1.0d"  (1 dia corrido)
+ * - 2880 → "2.0d"  (2 dias corridos)
  */
 export function formatMinutes(
   minutes: number,
-  format: 'auto' | 'short' | 'long' = 'auto'
+  format: 'auto' | 'short' | 'long' = 'auto',
+  workType: 'work' | 'wait' | 'milestone' = 'work'
 ): string {
   if (minutes === 0) return format === 'short' ? '0m' : '0 minutos'
 
   const absMinutes = Math.abs(minutes)
   const sign = minutes < 0 ? '-' : ''
 
+  // Determinar quantos minutos é "um dia" baseado no workType
+  const minutesPerDay = workType === 'wait' ? 1440 : MINUTES_PER_WORKING_DAY
+
   // Formato SHORT (compacto)
   if (format === 'short') {
     // >= 1 dia? Mostrar em dias com 1 casa decimal
-    if (absMinutes >= MINUTES_PER_WORKING_DAY) {
-      const days = minutesToDays(absMinutes)
+    if (absMinutes >= minutesPerDay) {
+      const days = absMinutes / minutesPerDay
       return `${sign}${days.toFixed(1)}d`
     }
     // >= 1 hora? Mostrar em horas
@@ -175,13 +176,18 @@ export function formatMinutes(
 
   // Formato LONG (detalhado)
   if (format === 'long') {
-    const days = Math.floor(absMinutes / MINUTES_PER_WORKING_DAY)
-    const remainingAfterDays = absMinutes % MINUTES_PER_WORKING_DAY
+    const days = Math.floor(absMinutes / minutesPerDay)
+    const remainingAfterDays = absMinutes % minutesPerDay
     const hours = Math.floor(remainingAfterDays / MINUTES_PER_HOUR)
     const mins = remainingAfterDays % MINUTES_PER_HOUR
 
     const parts: string[] = []
-    if (days > 0) parts.push(`${days} ${days === 1 ? 'dia' : 'dias'}`)
+    if (days > 0) {
+      const dayLabel = workType === 'wait'
+        ? (days === 1 ? 'dia corrido' : 'dias corridos')
+        : (days === 1 ? 'dia' : 'dias')
+      parts.push(`${days} ${dayLabel}`)
+    }
     if (hours > 0) parts.push(`${hours} ${hours === 1 ? 'hora' : 'horas'}`)
     if (mins > 0) parts.push(`${mins} ${mins === 1 ? 'minuto' : 'minutos'}`)
 
@@ -190,13 +196,18 @@ export function formatMinutes(
 
   // Formato AUTO (padrão - legível e conciso)
   // >= 1 dia? Mostrar em dias
-  if (absMinutes >= MINUTES_PER_WORKING_DAY) {
-    const days = minutesToDays(absMinutes)
+  if (absMinutes >= minutesPerDay) {
+    const days = absMinutes / minutesPerDay
     // Se for número redondo, não mostrar decimais
-    if (absMinutes % MINUTES_PER_WORKING_DAY === 0) {
-      return `${sign}${Math.round(days)} ${Math.round(days) === 1 ? 'dia' : 'dias'}`
+    if (absMinutes % minutesPerDay === 0) {
+      const roundedDays = Math.round(days)
+      const dayLabel = workType === 'wait'
+        ? (roundedDays === 1 ? 'dia corrido' : 'dias corridos')
+        : (roundedDays === 1 ? 'dia' : 'dias')
+      return `${sign}${roundedDays} ${dayLabel}`
     }
-    return `${sign}${days.toFixed(1)} dias`
+    const dayLabel = workType === 'wait' ? 'dias corridos' : 'dias'
+    return `${sign}${days.toFixed(1)} ${dayLabel}`
   }
 
   // >= 1 hora? Mostrar em horas

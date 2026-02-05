@@ -78,7 +78,37 @@ export function calculateDurationFromDates(
 }
 
 /**
+ * Adiciona dias úteis a uma data (pulando fins de semana)
+ *
+ * @param start Data inicial
+ * @param daysToAdd Número de dias úteis a adicionar
+ * @returns Nova data após adicionar os dias úteis
+ */
+function addWorkingDays(start: Date, daysToAdd: number): Date {
+  const result = new Date(start)
+  let addedDays = 0
+
+  // Se começar em fim de semana, avançar para segunda-feira
+  while (result.getDay() === 0 || result.getDay() === 6) {
+    result.setDate(result.getDate() + 1)
+  }
+
+  // Adicionar dias úteis
+  while (addedDays < daysToAdd) {
+    result.setDate(result.getDate() + 1)
+
+    // Se não for fim de semana, conta como dia adicionado
+    if (result.getDay() !== 0 && result.getDay() !== 6) {
+      addedDays++
+    }
+  }
+
+  return result
+}
+
+/**
  * Calcula end_date baseado em start_date e duration
+ * 🔄 ONDA 5.4: Agora pula fins de semana automaticamente
  */
 export function calculateEndDateFromDuration(
   startDate: string | Date,
@@ -90,14 +120,49 @@ export function calculateEndDateFromDuration(
     throw new Error('Start date is required')
   }
 
-  const end = new Date(start)
-  end.setDate(end.getDate() + Math.ceil(duration) - 1)
+  // Se duração for 0 ou negativa, retornar start_date
+  if (duration <= 0) {
+    return formatLocalDate(start)
+  }
 
-  return end.toISOString().split('T')[0]
+  // Adicionar dias úteis (duration - 1 porque o dia inicial conta)
+  const end = addWorkingDays(start, Math.ceil(duration) - 1)
+
+  return formatLocalDate(end)
+}
+
+/**
+ * Subtrai dias úteis de uma data (pulando fins de semana)
+ *
+ * @param end Data final
+ * @param daysToSubtract Número de dias úteis a subtrair
+ * @returns Nova data após subtrair os dias úteis
+ */
+function subtractWorkingDays(end: Date, daysToSubtract: number): Date {
+  const result = new Date(end)
+  let subtractedDays = 0
+
+  // Se terminar em fim de semana, voltar para sexta-feira
+  while (result.getDay() === 0 || result.getDay() === 6) {
+    result.setDate(result.getDate() - 1)
+  }
+
+  // Subtrair dias úteis
+  while (subtractedDays < daysToSubtract) {
+    result.setDate(result.getDate() - 1)
+
+    // Se não for fim de semana, conta como dia subtraído
+    if (result.getDay() !== 0 && result.getDay() !== 6) {
+      subtractedDays++
+    }
+  }
+
+  return result
 }
 
 /**
  * Calcula start_date baseado em end_date e duration
+ * 🔄 ONDA 5.4: Agora pula fins de semana automaticamente
  */
 export function calculateStartDateFromDuration(
   endDate: string | Date,
@@ -109,10 +174,15 @@ export function calculateStartDateFromDuration(
     throw new Error('End date is required')
   }
 
-  const start = new Date(end)
-  start.setDate(start.getDate() - Math.ceil(duration) + 1)
+  // Se duração for 0 ou negativa, retornar end_date
+  if (duration <= 0) {
+    return formatLocalDate(end)
+  }
 
-  return start.toISOString().split('T')[0]
+  // Subtrair dias úteis (duration - 1 porque o dia final conta)
+  const start = subtractWorkingDays(end, Math.ceil(duration) - 1)
+
+  return formatLocalDate(start)
 }
 
 /**

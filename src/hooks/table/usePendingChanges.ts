@@ -113,6 +113,9 @@ export function usePendingChanges() {
       for (const [field, value] of fields.entries()) {
         if (field === 'name' || field === 'progress') {
           taskUpdates[field] = value
+        } else if (field === 'type') {
+          // ONDA 5.5: Tipo de tarefa (projeto_mecanico, fabricacao, etc.)
+          taskUpdates[field] = value
         } else if (field === 'estimated_cost' || field === 'actual_cost') {
           taskUpdates[field] = value ? parseFloat(value as string) : 0
         } else if (field === 'lag_days') {

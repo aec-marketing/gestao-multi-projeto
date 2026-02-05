@@ -32,14 +32,15 @@ export function WorkTypeSelect({
         className={`
           px-2 py-1
           border border-gray-300 rounded
-          text-sm
+          text-sm text-gray-900
+          bg-white
           focus:outline-none focus:ring-2 focus:ring-blue-500
           disabled:bg-gray-100 disabled:cursor-not-allowed
           ${className}
         `}
       >
         {WORK_TYPE_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
+          <option key={option.value} value={option.value} className="text-gray-900 bg-white">
             {option.icon} {option.label}
           </option>
         ))}

@@ -6,7 +6,8 @@ export function getTaskColor(
   isSubtask: boolean,
   isDelayed: boolean = false,
   taskId?: string,
-  tasksInCycle?: Set<string>
+  tasksInCycle?: Set<string>,
+  workType?: 'work' | 'wait' | 'milestone'
 ): string {
   // Tasks in cycle are highlighted in red
   if (taskId && tasksInCycle?.has(taskId)) {
@@ -18,8 +19,13 @@ export function getTaskColor(
     return 'bg-red-600'
   }
 
-  // Default subtask color
-  if (isSubtask) {
+  // ONDA 5.5: Tarefas tipo "Dependência" (wait) têm cor amarela diferenciada
+  if (workType === 'wait') {
+    return isSubtask ? 'bg-yellow-400' : 'bg-yellow-500 border-2 border-yellow-600'
+  }
+
+  // Default subtask color (mas apenas se não tiver work_type específico)
+  if (isSubtask && type === 'subtarefa') {
     return 'bg-gray-400'
   }
 
@@ -33,7 +39,8 @@ export function getTaskColor(
     'tratamento_superficial': 'bg-pink-500',
     'montagem_mecanica': 'bg-indigo-500',
     'montagem_eletrica': 'bg-red-500',
-    'coleta': 'bg-teal-500'
+    'coleta': 'bg-teal-500',
+    'subtarefa': 'bg-gray-400'  // Fallback para subtarefas
   }
 
   return colors[type] || 'bg-gray-500'

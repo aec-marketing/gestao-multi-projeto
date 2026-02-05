@@ -24,9 +24,102 @@ import TableViewErrorBoundary from '@/components/error-boundary/TableViewErrorBo
 import { daysToMinutes } from '@/utils/time.utils'
 import { WorkType } from '@/utils/workType.utils'
 import { updateTaskActualCost } from '@/lib/task-cost-service'
+import { supabase } from '@/lib/supabase'
 
 interface TableViewTabProps {
   project: Project
+}
+
+/**
+ * 🔄 ONDA 5.4: Sincroniza allocations quando start_date da task muda
+ *
+ * Quando o usuário muda o start_date de uma tarefa, todas as allocations
+ * precisam ser ajustadas para começar a partir da nova data, preservando
+ * a duração e distribuição de cada alocação.
+ */
+async function syncAllocationsWithTaskStartDate(
+  taskId: string,
+  oldStartDate: string,
+  newStartDate: string
+) {
+  if (!oldStartDate || !newStartDate || oldStartDate === newStartDate) {
+    return // Nenhuma mudança
+  }
+
+  console.log('[SYNC-DEBUG] Sincronizando allocations:', {
+    taskId,
+    oldStartDate,
+    newStartDate
+  })
+
+  try {
+    // 1. Buscar todas as allocations desta tarefa
+    const { data: allocations, error: fetchError } = await supabase
+      .from('allocations')
+      .select('*')
+      .eq('task_id', taskId)
+
+    if (fetchError) {
+      console.error('[SYNC-DEBUG] Erro ao buscar allocations:', fetchError)
+      return
+    }
+
+    if (!allocations || allocations.length === 0) {
+      console.log('[SYNC-DEBUG] Nenhuma allocation para sincronizar')
+      return
+    }
+
+    // 2. Calcular offset de dias
+    const oldDate = new Date(oldStartDate + 'T00:00:00')
+    const newDate = new Date(newStartDate + 'T00:00:00')
+    const daysDiff = Math.floor((newDate.getTime() - oldDate.getTime()) / (1000 * 60 * 60 * 24))
+
+    console.log('[SYNC-DEBUG] Offset de dias:', daysDiff)
+
+    // 3. Atualizar cada allocation
+    const updates = allocations.map(alloc => {
+      const allocStart = new Date(alloc.start_date + 'T00:00:00')
+      const allocEnd = new Date(alloc.end_date + 'T00:00:00')
+
+      // Aplicar offset
+      allocStart.setDate(allocStart.getDate() + daysDiff)
+      allocEnd.setDate(allocEnd.getDate() + daysDiff)
+
+      const newAllocStart = allocStart.toISOString().split('T')[0]
+      const newAllocEnd = allocEnd.toISOString().split('T')[0]
+
+      console.log('[SYNC-DEBUG] Atualizando allocation:', {
+        id: alloc.id,
+        de: `${alloc.start_date} - ${alloc.end_date}`,
+        para: `${newAllocStart} - ${newAllocEnd}`
+      })
+
+      return {
+        id: alloc.id,
+        start_date: newAllocStart,
+        end_date: newAllocEnd
+      }
+    })
+
+    // 4. Executar batch update no banco
+    for (const update of updates) {
+      const { error: updateError } = await supabase
+        .from('allocations')
+        .update({
+          start_date: update.start_date,
+          end_date: update.end_date
+        })
+        .eq('id', update.id)
+
+      if (updateError) {
+        console.error('[SYNC-DEBUG] Erro ao atualizar allocation:', updateError)
+      }
+    }
+
+    console.log('[SYNC-DEBUG] Sincronização concluída -', updates.length, 'allocations atualizadas')
+  } catch (error) {
+    console.error('[SYNC-DEBUG] Erro na sincronização:', error)
+  }
 }
 
 /**
@@ -228,12 +321,27 @@ export default function TableViewTab({ project }: TableViewTabProps) {
   const handleSaveAll = useCallback(async () => {
     const updates = prepareBatchUpdates(tasks)
 
+    // 🔄 ONDA 5.4: Identificar tarefas com mudanças de start_date que precisam sincronizar allocations
+    const tasksWithStartDateChange = new Map<string, { oldDate: string; newDate: string }>()
+
     // Identificar tarefas com mudanças que afetam custo
     const tasksToRecalculate = new Set<string>()
 
     updates.forEach(update => {
       // Estrutura correta: { id, updates }
       const changes = update.updates
+
+      // 🔄 ONDA 5.4: Detectar mudança de start_date
+      if (changes.start_date !== undefined) {
+        const task = tasks.find(t => t.id === update.id)
+        if (task && task.start_date !== changes.start_date) {
+          tasksWithStartDateChange.set(update.id, {
+            oldDate: task.start_date || '',
+            newDate: changes.start_date
+          })
+        }
+      }
+
       // Se mudou duration_minutes, start_date, end_date -> recalcular custo
       if (changes.duration_minutes !== undefined ||
           changes.start_date !== undefined ||
@@ -244,6 +352,15 @@ export default function TableViewTab({ project }: TableViewTabProps) {
 
     try {
       await batchUpdateMutation.mutateAsync(updates)
+
+      // 🔄 ONDA 5.4: Sincronizar allocations quando start_date mudou
+      if (tasksWithStartDateChange.size > 0) {
+        console.log('[SYNC-DEBUG] Sincronizando allocations para', tasksWithStartDateChange.size, 'tarefas')
+
+        for (const [taskId, { oldDate, newDate }] of tasksWithStartDateChange.entries()) {
+          await syncAllocationsWithTaskStartDate(taskId, oldDate, newDate)
+        }
+      }
 
       // ONDA 1: Recalcular custos das tarefas afetadas
       if (tasksToRecalculate.size > 0) {

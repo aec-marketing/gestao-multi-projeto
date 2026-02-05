@@ -145,7 +145,8 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
     !!task.parent_id, // isSubtask
     isLate,
     task.id,
-    isInCycle ? new Set([task.id]) : undefined
+    isInCycle ? new Set([task.id]) : undefined,
+    task.work_type // ONDA 5.5: Passar work_type para coloração diferenciada
   )
 
   return (

@@ -115,7 +115,7 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
         className={`${baseClasses} bg-gray-50 cursor-default text-gray-600 italic`}
         title="Duração calculada automaticamente pela soma das subtarefas"
       >
-        <TimeDisplay value={value} format="short" />
+        <TimeDisplay value={value} format="short" workType={workType} />
         <span className="text-xs ml-1 text-gray-400">∑</span>
       </div>
     )
@@ -147,8 +147,8 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
             title="Dias corridos (inclui fins de semana)"
             autoFocus
           />
-          <div className="text-[10px] text-gray-500 mt-0.5 text-center">
-            dias corridos
+          <div className="text-[10px] text-yellow-600 mt-0.5 text-center font-mono">
+            dias corridos (24h/dia)
           </div>
         </div>
       )
@@ -178,7 +178,7 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
         onDoubleClick={handleDoubleClick}
         onMouseEnter={handleMouseEnter}
       >
-        <TimeDisplay value={value} format="short" />
+        <TimeDisplay value={value} format="short" workType={workType} />
       </div>
 
       {/* Tooltip com posicionamento inteligente */}
@@ -192,8 +192,8 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
         <div className="space-y-1">
           <p className="font-semibold text-blue-300">Detalhes da duração:</p>
           <p>• {value} minutos</p>
-          <p>• {formatMinutes(value, 'auto')}</p>
-          <p>• {formatMinutes(value, 'long')}</p>
+          <p>• {formatMinutes(value, 'auto', workType)}</p>
+          <p>• {formatMinutes(value, 'long', workType)}</p>
           {!isReadOnly && (
             <p className="text-gray-400 text-xs mt-2 border-t border-gray-700 pt-1">
               Clique duplo para editar

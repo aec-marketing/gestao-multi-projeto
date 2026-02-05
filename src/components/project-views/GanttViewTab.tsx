@@ -30,6 +30,7 @@ import AllocationModal from '@/components/AllocationModal'
 import SubtaskManager from '@/components/SubtaskManager'
 import RecalculateModal from '@/components/modals/RecalculateModal'
 import CycleAuditModal from '@/components/modals/CycleAuditModal'
+import { getTaskColor } from '@/components/gantt/utils/ganttColors'
 
 // Hooks customizados
 import { useGanttState } from '@/components/gantt/hooks/useGanttState'
@@ -39,6 +40,7 @@ import { useGanttResize } from '@/components/gantt/hooks/useGanttResize'
 import { useGanttDragDrop } from '@/components/gantt/hooks/useGanttDragDrop'
 import { useGanttSync } from '@/components/gantt/hooks/useGanttSync'
 import { useGanttPendingChanges } from '@/components/gantt/hooks/useGanttPendingChanges'
+import { usePredecessorEditing } from '@/components/gantt/hooks/usePredecessorEditing'
 
 // Utils
 import { getColumnWidth, calculateDateRange, calculateAllocationBarStyle } from '@/components/gantt/utils/ganttCalculations'
@@ -69,6 +71,9 @@ export default function GanttViewTab({
 
   // ========== PENDING CHANGES (BATCH SAVE) ==========
   const pendingChanges = useGanttPendingChanges()
+
+  // ========== PREDECESSOR EDITING MODE (ONDA 5.7) ==========
+  const predecessorEditing = usePredecessorEditing()
 
   // ========== TOOLTIP HOVER ==========
   const [hoveredTask, setHoveredTask] = useState<TaskWithAllocations | null>(null)
@@ -382,6 +387,62 @@ export default function GanttViewTab({
     if (error) {
       alert('Erro ao deletar tarefa')
     } else {
+      onRefresh()
+    }
+  }
+
+  // ONDA 5.7: Handler para criar predecessor via drag & drop de âncoras
+  const handleCreatePredecessorFromAnchors = async (
+    sourceTaskId: string,
+    sourceAnchor: 'start' | 'end',
+    targetTaskId: string,
+    targetAnchor: 'start' | 'end'
+  ) => {
+    // Validar: não pode conectar tarefa a si mesma
+    if (sourceTaskId === targetTaskId) {
+      alert('⚠️ Uma tarefa não pode depender de si mesma!')
+      return
+    }
+
+    // Determinar o tipo de predecessor baseado nas âncoras
+    const relationType = predecessorEditing.getRelationType(sourceAnchor, targetAnchor)
+
+    // Validar se já existe essa dependência
+    const existingPred = state.data.predecessors.find(
+      p => p.task_id === targetTaskId && p.predecessor_id === sourceTaskId
+    )
+    if (existingPred) {
+      alert('⚠️ Esta dependência já existe!')
+      return
+    }
+
+    // Validar ciclos (usar biblioteca de validação)
+    const { wouldCreateCycle } = await import('@/lib/msproject/validation')
+    const existingPredecessors = state.data.predecessors.map(p => ({
+      task_id: p.task_id,
+      predecessor_id: p.predecessor_id
+    }))
+
+    if (wouldCreateCycle(targetTaskId, sourceTaskId, existingPredecessors, tasks)) {
+      alert('⚠️ Este predecessor criaria uma dependência circular!')
+      return
+    }
+
+    // Criar o predecessor
+    const { error } = await supabase
+      .from('predecessors')
+      .insert({
+        task_id: targetTaskId,
+        predecessor_id: sourceTaskId,
+        type: relationType,
+        lag_minutes: 0
+      })
+
+    if (error) {
+      console.error('Erro ao criar predecessor:', error)
+      alert('❌ Erro ao criar predecessor')
+    } else {
+      alert('✅ Predecessor criado com sucesso!')
       onRefresh()
     }
   }
@@ -831,11 +892,21 @@ export default function GanttViewTab({
               const hasOvertime = (allocation.overtime_minutes || 0) > 0
               const overtimeBorderClass = hasOvertime ? 'border-2 border-orange-500 ring-1 ring-orange-300' : ''
 
+              // ONDA 5.5: Obter cor baseada no work_type e type
+              const taskColor = getTaskColor(
+                task.type,
+                !!task.parent_id,
+                isTaskLate(task.id),
+                task.id,
+                undefined,
+                task.work_type
+              )
+
               return (
                 <React.Fragment key={allocation.id}>
                   {/* Barra do fragmento */}
                   <div
-                    className={`absolute h-8 bg-blue-500 rounded cursor-pointer hover:bg-blue-600 group ${overtimeBorderClass}`}
+                    className={`absolute h-8 ${taskColor} rounded cursor-pointer group ${overtimeBorderClass}`}
                     style={{
                       ...fragmentStyle,
                       transition: 'all 0.15s ease-out'
@@ -913,9 +984,19 @@ export default function GanttViewTab({
             const overtimeClass = hasOvertimeSingle ? 'border-2 border-orange-500 ring-1 ring-orange-300' : ''
             const durationClass = (task.duration_minutes ?? 540) < 540 ? 'border-2 border-blue-700 border-dashed' : ''
 
+            // ONDA 5.5: Obter cor baseada no work_type e type
+            const taskColorSingle = getTaskColor(
+              task.type,
+              !!task.parent_id,
+              isTaskLate(task.id),
+              task.id,
+              undefined,
+              task.work_type
+            )
+
             return (
               <div
-                className={`absolute h-8 bg-blue-500 rounded cursor-pointer hover:bg-blue-600 group ${
+                className={`absolute h-8 ${taskColorSingle} rounded cursor-pointer group ${
                   isResizing ? 'ring-2 ring-blue-400 shadow-lg' : ''
                 } ${
                   hasOvertimeSingle ? overtimeClass : durationClass
@@ -1019,6 +1100,8 @@ export default function GanttViewTab({
           onSyncDates={sync.syncAllParentDates}
           onAuditConflicts={handleAuditConflicts}
           onAuditCycles={() => actions.openModal('showCycleAudit')}
+          predecessorEditingMode={predecessorEditing.editingMode}
+          onTogglePredecessorMode={predecessorEditing.toggleEditingMode}
         />
 
         {/* Filtros */}
@@ -1188,9 +1271,13 @@ export default function GanttViewTab({
         />
       )}
 
-      {/* Tooltip rico no canto (hover) */}
-      {hoveredTask && !selectedTaskWithAllocations && (
-        <div className="fixed bottom-4 right-4 bg-white border border-gray-300 rounded-lg shadow-xl p-4 z-50 max-w-xs transition-opacity duration-200">
+      {/* Tooltip rico (hover) - Muda posição quando painel está aberto */}
+      {hoveredTask && (
+        <div className={`fixed bg-white border border-gray-300 rounded-lg shadow-xl p-4 z-[60] max-w-xs transition-all duration-200 ${
+          state.selection.selectedTask
+            ? 'bottom-4 left-4'  // Esquerda quando painel está aberto
+            : 'bottom-4 right-4' // Direita quando painel está fechado
+        }`}>
           <div className="space-y-2">
             <div className="font-semibold text-gray-900 text-sm border-b pb-2">
               {hoveredTask.name}

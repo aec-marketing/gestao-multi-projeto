@@ -12,9 +12,11 @@ import { useActiveResources, useAllocations } from '@/hooks/useResources'
 import { useResourceContext } from '@/contexts/ResourceContext'
 import { checkResourceAvailability, ResourceConflict } from '@/lib/resource-service'
 import { updateTaskActualCost } from '@/lib/task-cost-service'
-import { detectCapacityOverflow, generateOvertimeOptions, CapacityOverflowResult, OvertimeOption, calculateMultiDayAllocationPlan, MultiDayAllocationPlan } from '@/utils/allocation.utils'
+import { detectCapacityOverflow, generateOvertimeOptions, CapacityOverflowResult, OvertimeOption, calculateMultiDayAllocationPlan, MultiDayAllocationPlan, WeekendDecision, WeekendDay } from '@/utils/allocation.utils'
 import { OvertimeDecisionModal } from '@/components/project/OvertimeDecisionModal'
 import { MultiDayAllocationModal, DayDecision } from '@/components/project/MultiDayAllocationModal'
+import { WeekendDecisionModal } from '@/components/project/WeekendDecisionModal' // 🌊 ONDA 4.3
+import { AllocationPlanner, AllocationFragment } from '@/components/project/AllocationPlanner' // 🌊 ONDA 5
 
 interface AllocationModalProps {
   task: Task
@@ -70,6 +72,15 @@ export default function AllocationModal({
   const [showMultiDayModal, setShowMultiDayModal] = useState(false)
   const [multiDayPlan, setMultiDayPlan] = useState<MultiDayAllocationPlan | null>(null)
 
+  // 🌊 ONDA 4.3: Estado do modal de fim de semana
+  const [showWeekendModal, setShowWeekendModal] = useState(false)
+  const [weekendDays, setWeekendDays] = useState<WeekendDay[]>([])
+  const [weekendDecisions, setWeekendDecisions] = useState<WeekendDecision[]>([]) // Armazenar decisões de fim de semana
+
+  // 🌊 ONDA 5: Estado do Planner
+  const [showPlanner, setShowPlanner] = useState(false)
+  const [existingFragmentsForEdit, setExistingFragmentsForEdit] = useState<AllocationFragment[]>([])
+
   // Filter allocations for this specific task
   const existingAllocations = allAllocations.filter(a => a.task_id === task.id)
   const isLoading = resourcesLoading
@@ -105,6 +116,45 @@ export default function AllocationModal({
     }
   }, [allocationId, allAllocations, task.duration_minutes])
 
+  /**
+   * 🌊 ONDA 5.2: Abrir Planner em modo de edição
+   */
+  function openPlannerForEdit(resourceId: string) {
+    console.log('[PLANNER-DEBUG] Abrindo Planner para edição - recurso:', resourceId)
+
+    const selectedResource = allResources.find(r => r.id === resourceId)
+    if (!selectedResource) {
+      console.log('[PLANNER-DEBUG] Recurso não encontrado:', resourceId)
+      return
+    }
+
+    // Buscar TODOS os fragmentos deste recurso nesta tarefa
+    const resourceFragments = existingAllocations
+      .filter(a => a.resource_id === resourceId)
+      .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())
+      .map(a => ({
+        start_date: a.start_date,
+        end_date: a.end_date,
+        allocated_minutes: a.allocated_minutes ?? 0,
+        overtime_minutes: a.overtime_minutes || 0,
+        overtime_multiplier: (a as any).overtime_multiplier || 1.0
+      }))
+
+    console.log('[PLANNER-DEBUG] Fragmentos encontrados:', resourceFragments)
+
+    setSelectedResourceForModal(selectedResource)
+    setExistingFragmentsForEdit(resourceFragments)
+    setPendingAllocation({
+      resourceId: resourceId,
+      priority: existingAllocations.find(a => a.resource_id === resourceId)?.priority as 'alta' | 'media' | 'baixa' || 'media',
+      allocationType: 'full',
+      allocatedMinutes: task.duration_minutes || 0
+    })
+
+    // Abrir Planner em modo de edição
+    setShowPlanner(true)
+  }
+
   // ONDA 3: Detecção automática de overflow quando recurso é selecionado
   useEffect(() => {
     const detectOverflow = async () => {
@@ -116,9 +166,9 @@ export default function AllocationModal({
       })
 
       // Só detectar para novas alocações (não em modo de edição)
-      if (allocationId || !selectedResourceId || !task.start_date) {
+      if (!selectedResourceId || !task.start_date) {
         console.log('[OVERFLOW-DEBUG] Saindo cedo:', {
-          motivo: allocationId ? 'modo edição' : !selectedResourceId ? 'sem recurso' : 'sem data'
+          motivo: !selectedResourceId ? 'sem recurso' : 'sem data'
         })
         return
       }
@@ -232,6 +282,81 @@ export default function AllocationModal({
 
       console.log('[MULTI-DAY-DEBUG] Plano calculado:', plan)
 
+      // 🌊 ONDA 5: Abrir Planner para TODOS os casos multi-dia
+      // (Substitui os modais de Weekend e MultiDay)
+      if (plan.days.length > 1 || plan.requiresWeekendDecision || plan.requiresUserDecision) {
+        console.log('[PLANNER-DEBUG] 🎯 Abrindo Planner para planejamento visual')
+
+        // Guardar informações da alocação pendente
+        setPendingAllocation({
+          resourceId: selectedResourceId,
+          priority: priority,
+          allocationType: allocationType,
+          allocatedMinutes: allocatedMinutes
+        })
+
+        setSelectedResourceForModal(selectedResource)
+        setMultiDayPlan(plan)
+        setShowPlanner(true)
+
+        console.log('[PLANNER-DEBUG] Planner aberto!')
+        return
+      }
+
+      // 🌊 ONDA 5: Modais antigos DESATIVADOS (mantidos para possível reativação)
+      /*
+      // 🌊 ONDA 4.3: PRIORIDADE CRONOLÓGICA - Verificar fins de semana PRIMEIRO
+      if (plan.requiresWeekendDecision && plan.weekendsDetected > 0) {
+        console.log('[WEEKEND-DEBUG] 🏖️ Fins de semana detectados - abrindo modal de fim de semana PRIMEIRO')
+
+        // Guardar informações da alocação pendente
+        setPendingAllocation({
+          resourceId: selectedResourceId,
+          priority: priority,
+          allocationType: allocationType,
+          allocatedMinutes: allocatedMinutes
+        })
+
+        setSelectedResourceForModal(selectedResource)
+        setMultiDayPlan(plan)
+
+        // Extrair fins de semana do plano para o modal
+        const weekends: WeekendDay[] = []
+        let remainingMinutes = minutesToAllocate
+
+        // Simular distribuição cronológica para saber quantos minutos restam em cada fim de semana
+        const dailyCapacity = selectedResource.daily_capacity_minutes || 540
+        const planDate = new Date(task.start_date + 'T00:00:00')
+
+        while (remainingMinutes > 0) {
+          const dateStr = planDate.toISOString().split('T')[0]
+          const dayOfWeek = planDate.getDay() // 0 = domingo, 6 = sábado
+
+          if (dayOfWeek === 0 || dayOfWeek === 6) {
+            // É fim de semana
+            weekends.push({
+              date: dateStr,
+              dayOfWeek: dayOfWeek === 6 ? 'Sábado' : 'Domingo',
+              remainingMinutes
+            })
+          } else {
+            // Dia útil - consumir capacidade
+            remainingMinutes -= Math.min(remainingMinutes, dailyCapacity)
+          }
+
+          planDate.setDate(planDate.getDate() + 1)
+
+          // Segurança
+          if (weekends.length > 10) break
+        }
+
+        setWeekendDays(weekends)
+        setShowWeekendModal(true)
+
+        console.log('[WEEKEND-DEBUG] Estado do modal de fim de semana atualizado!', weekends)
+        return // Parar aqui - modal de overflow só abre depois
+      }
+
       // Se o plano requer decisão do usuário (tem dias com overflow), abrir modal multi-dia
       if (plan.requiresUserDecision) {
         console.log('[MULTI-DAY-DEBUG] ⚠️ OVERFLOW MULTI-DIA DETECTADO! Abrindo modal...')
@@ -252,6 +377,7 @@ export default function AllocationModal({
       } else {
         console.log('[MULTI-DAY-DEBUG] ✅ Sem overflow ou overflow resolvido automaticamente')
       }
+      */
     }
 
     detectOverflow()
@@ -701,8 +827,11 @@ export default function AllocationModal({
     try {
       const { resourceId, priority } = pendingAllocation
 
-      // Recalcular plano com as decisões do usuário
-      const decisionsMap = new Map(decisions.map(d => [d.date, d]))
+      // 🌊 ONDA 4.4: Mapear decisões de overflow E fim de semana
+      const overflowDecisionsMap = new Map(decisions.map(d => [d.date, d]))
+      const weekendDecisionsMap = new Map(weekendDecisions.map(d => [d.date, d]))
+
+      console.log('[MULTI-DAY-DEBUG] 🌊 ONDA 4.4: Decisões de fim de semana:', Array.from(weekendDecisionsMap.entries()))
 
       // Para cada dia do plano, criar alocação
       const allocationsToCreate: any[] = []
@@ -711,63 +840,90 @@ export default function AllocationModal({
 
       console.log('[MULTI-DAY-DEBUG] Criando alocações para', remainingMinutes, 'minutos totais')
       console.log('[MULTI-DAY-DEBUG] Plano tem', multiDayPlan.days.length, 'dias')
-      console.log('[MULTI-DAY-DEBUG] Decisões recebidas:', Array.from(decisionsMap.entries()))
+      console.log('[MULTI-DAY-DEBUG] Decisões de overflow:', Array.from(overflowDecisionsMap.entries()))
 
-      // IMPORTANTE: Iterar sobre TODOS os dias do plano (não só os com overflow)
-      for (const day of multiDayPlan.days) {
-        if (remainingMinutes <= 0) {
-          console.log('[MULTI-DAY-DEBUG] Sem minutos restantes, parando')
-          break
-        }
+      // 🌊 ONDA 4.4: Processar CRONOLOGICAMENTE - incluindo fins de semana
+      let currentDate = new Date(task.start_date + 'T00:00:00')
+      const maxDays = 60 // Segurança
 
-        const decision = decisionsMap.get(day.date)
+      for (let dayIndex = 0; dayIndex < maxDays && remainingMinutes > 0; dayIndex++) {
+        const dateStr = currentDate.toISOString().split('T')[0]
+        const dayOfWeek = currentDate.getDay() // 0 = domingo, 6 = sábado
+        const isWeekendDay = dayOfWeek === 0 || dayOfWeek === 6
+
+        console.log('[MULTI-DAY-DEBUG] 📅 Processando dia:', dateStr, { isWeekend: isWeekendDay, remainingMinutes })
 
         let normalMinutes = 0
         let overtimeMinutes = 0
         let overtimeMultiplier = 1.0
 
-        // Calcular minutos para este dia
-        if (day.hasOverflow) {
-          // Dia com overflow - verificar decisão do usuário
-          if (decision?.useOvertime) {
-            // Usuário escolheu usar hora extra
-            normalMinutes = Math.min(remainingMinutes, day.normalMinutes)
-            overtimeMinutes = Math.min(decision.overtimeMinutes, remainingMinutes - normalMinutes)
-            overtimeMultiplier = decision.overtimeMultiplier
-            remainingMinutes -= (normalMinutes + overtimeMinutes)
+        // 🌊 ONDA 4.4: Verificar se é FIM DE SEMANA
+        if (isWeekendDay) {
+          const weekendDecision = weekendDecisionsMap.get(dateStr)
+
+          if (weekendDecision?.useWeekend) {
+            // Usuário escolheu TRABALHAR no fim de semana
+            console.log('[WEEKEND-DEBUG] 🏖️ Trabalhando no fim de semana:', dateStr)
+            normalMinutes = Math.min(remainingMinutes, weekendDecision.minutesToWork)
+            overtimeMinutes = normalMinutes // TODO FIM DE SEMANA É TUDO OVERTIME
+            normalMinutes = 0 // Zerar normal pois tudo é overtime
+            overtimeMultiplier = 2.0 // Fim de semana sempre 2.0×
+            remainingMinutes -= overtimeMinutes
           } else {
-            // Usuário escolheu empurrar - alocar apenas capacidade normal
-            normalMinutes = Math.min(remainingMinutes, day.normalMinutes)
-            remainingMinutes -= normalMinutes
+            // Usuário escolheu PULAR fim de semana
+            console.log('[WEEKEND-DEBUG] ⏭️ Pulando fim de semana:', dateStr)
+            currentDate.setDate(currentDate.getDate() + 1)
+            continue
           }
         } else {
-          // Dia sem overflow - alocar tudo que cabe (dias finais)
-          normalMinutes = Math.min(remainingMinutes, dailyCapacity)
-          remainingMinutes -= normalMinutes
+          // DIA ÚTIL - processar normalmente
+          const overflowDecision = overflowDecisionsMap.get(dateStr)
+          const dayPlan = multiDayPlan.days.find(d => d.date === dateStr)
+
+          if (dayPlan?.hasOverflow) {
+            // Dia com overflow - verificar decisão do usuário
+            if (overflowDecision?.useOvertime) {
+              // Usuário escolheu usar hora extra
+              normalMinutes = Math.min(remainingMinutes, dayPlan.normalMinutes)
+              overtimeMinutes = Math.min(overflowDecision.overtimeMinutes, remainingMinutes - normalMinutes)
+              overtimeMultiplier = overflowDecision.overtimeMultiplier
+              remainingMinutes -= (normalMinutes + overtimeMinutes)
+            } else {
+              // Usuário escolheu empurrar - alocar apenas capacidade normal
+              normalMinutes = Math.min(remainingMinutes, dayPlan.normalMinutes)
+              remainingMinutes -= normalMinutes
+            }
+          } else {
+            // Dia sem overflow - alocar tudo que cabe (dias finais)
+            normalMinutes = Math.min(remainingMinutes, dailyCapacity)
+            remainingMinutes -= normalMinutes
+          }
         }
 
-        console.log('[MULTI-DAY-DEBUG] Dia', day.date, {
-          hasOverflow: day.hasOverflow,
+        console.log('[MULTI-DAY-DEBUG] Dia', dateStr, {
+          isWeekend: isWeekendDay,
           normalMinutes,
           overtimeMinutes,
           overtimeMultiplier,
-          remainingMinutes,
-          decision: decision ? 'sim' : 'não'
+          remainingMinutes
         })
 
-        // Criar alocação (mesmo que seja zero, para manter consistência)
+        // Criar alocação
         if (normalMinutes > 0 || overtimeMinutes > 0) {
           allocationsToCreate.push({
             resource_id: resourceId,
             task_id: task.id,
             priority,
-            start_date: day.date,
-            end_date: day.date,
+            start_date: dateStr,
+            end_date: dateStr,
             allocated_minutes: normalMinutes,
             overtime_minutes: overtimeMinutes,
             overtime_multiplier: overtimeMultiplier
           })
         }
+
+        // Avançar para o próximo dia
+        currentDate.setDate(currentDate.getDate() + 1)
       }
 
       // Inserir todas as alocações
@@ -821,6 +977,162 @@ export default function AllocationModal({
     setPendingAllocation(null)
     setMultiDayPlan(null)
     setSelectedResourceForModal(null)
+    setIsSaving(false)
+  }
+
+  /**
+   * 🌊 ONDA 4.3: Processar decisões do modal de fim de semana
+   */
+  function handleWeekendDecisions(decisions: WeekendDecision[]) {
+    console.log('[WEEKEND-DEBUG] 🎉 Decisões de fim de semana recebidas:', decisions)
+
+    // Armazenar decisões
+    setWeekendDecisions(decisions)
+    setShowWeekendModal(false)
+
+    // Agora abrir modal de overflow (se necessário)
+    if (multiDayPlan?.requiresUserDecision) {
+      console.log('[WEEKEND-DEBUG] → Abrindo modal de overflow agora...')
+      setShowMultiDayModal(true)
+    } else {
+      console.log('[WEEKEND-DEBUG] ✅ Sem overflow - criando alocações direto')
+      // TODO: Criar alocações com decisões de fim de semana
+    }
+  }
+
+  /**
+   * 🌊 ONDA 4.3: Cancelar modal de fim de semana
+   */
+  function handleCancelWeekendDecision() {
+    setShowWeekendModal(false)
+    setPendingAllocation(null)
+    setMultiDayPlan(null)
+    setWeekendDays([])
+    setWeekendDecisions([])
+    setSelectedResourceForModal(null)
+    setIsSaving(false)
+  }
+
+  /**
+   * 🌊 ONDA 5: Processar fragmentos do Planner
+   */
+  async function handlePlannerConfirm(fragments: AllocationFragment[]) {
+    console.log('[PLANNER-DEBUG] Fragmentos recebidos:', fragments)
+
+    if (!pendingAllocation || !selectedResourceForModal) {
+      console.error('[PLANNER-DEBUG] Dados pendentes não encontrados!')
+      return
+    }
+
+    setShowPlanner(false)
+    setIsSaving(true)
+
+    try {
+      const { resourceId, priority } = pendingAllocation
+
+      // 🔄 MODO DE EDIÇÃO: Verificar se já existem alocações deste recurso
+      const existingResourceAllocations = existingAllocations.filter(a => a.resource_id === resourceId)
+      const isEditMode = existingResourceAllocations.length > 0
+
+      if (isEditMode) {
+        console.log('[PLANNER-DEBUG] Modo de edição - deletando alocações antigas')
+
+        // Deletar TODAS as alocações deste recurso nesta tarefa
+        const { error: deleteError } = await supabase
+          .from('allocations')
+          .delete()
+          .eq('task_id', task.id)
+          .eq('resource_id', resourceId)
+
+        if (deleteError) {
+          console.error('[PLANNER-DEBUG] Erro ao deletar alocações antigas:', deleteError)
+          throw deleteError
+        }
+      }
+
+      // Criar alocações para cada fragmento
+      const allocationsToCreate = fragments.map(fragment => ({
+        resource_id: resourceId,
+        task_id: task.id,
+        priority,
+        start_date: fragment.start_date,
+        end_date: fragment.end_date,
+        allocated_minutes: fragment.allocated_minutes,
+        overtime_minutes: fragment.overtime_minutes,
+        overtime_multiplier: fragment.overtime_multiplier
+      }))
+
+      console.log('[PLANNER-DEBUG] Criando alocações:', allocationsToCreate)
+
+      // Inserir todas as alocações
+      const { error: insertError } = await supabase
+        .from('allocations')
+        .insert(allocationsToCreate)
+
+      if (insertError) {
+        console.error('[PLANNER-DEBUG] Erro ao inserir alocações:', insertError)
+        throw insertError
+      }
+
+      // 🔄 Atualizar end_date da tarefa baseado no último fragmento de TODOS os recursos
+      // Buscar todas as alocações da tarefa (incluindo as que acabamos de inserir)
+      const { data: allTaskAllocations, error: fetchError } = await supabase
+        .from('allocations')
+        .select('end_date')
+        .eq('task_id', task.id)
+        .order('end_date', { ascending: false })
+        .limit(1)
+
+      if (fetchError) {
+        console.error('[PLANNER-DEBUG] Erro ao buscar alocações para atualizar end_date:', fetchError)
+      } else if (allTaskAllocations && allTaskAllocations.length > 0) {
+        const latestEndDate = allTaskAllocations[0].end_date
+        console.log('[PLANNER-DEBUG] Atualizando end_date da tarefa para:', latestEndDate)
+
+        const { error: updateTaskError } = await supabase
+          .from('tasks')
+          .update({ end_date: latestEndDate })
+          .eq('id', task.id)
+
+        if (updateTaskError) {
+          console.error('[PLANNER-DEBUG] Erro ao atualizar end_date da tarefa:', updateTaskError)
+          // Não lançar erro, apenas logar
+        }
+      }
+
+      // Atualizar custo real da tarefa
+      await updateTaskActualCost(task.id)
+
+      const message = isEditMode
+        ? `Alocação atualizada com sucesso (${fragments.length} fragmento(s))`
+        : `${fragments.length} alocação(ões) criada(s) com sucesso`
+
+      showSuccessAlert(message)
+
+      // Refresh
+      await refreshAllocations()
+      onSuccess()
+    } catch (error) {
+      logError(error as Error, ErrorContext.AllocationCreate)
+      showErrorAlert('Erro ao criar alocações')
+    } finally {
+      setIsSaving(false)
+      setPendingAllocation(null)
+      setMultiDayPlan(null)
+      setSelectedResourceForModal(null)
+      setExistingFragmentsForEdit([])
+    }
+  }
+
+  /**
+   * 🌊 ONDA 5: Cancelar Planner
+   */
+  function handlePlannerCancel() {
+    setShowPlanner(false)
+    setPendingAllocation(null)
+    setMultiDayPlan(null)
+    setSelectedResourceForModal(null)
+    setExistingFragmentsForEdit([])
     setIsSaving(false)
   }
 
@@ -932,7 +1244,37 @@ export default function AllocationModal({
         />
       )}
 
-      {/* ONDA 3.5: Modal de Alocação Multi-Dia Recursiva */}
+      {/* 🌊 ONDA 5: Planner Visual (substitui modais de Weekend e MultiDay) */}
+      {showPlanner && selectedResourceForModal && task.start_date && (
+        <AllocationPlanner
+          taskName={task.name}
+          taskStartDate={task.start_date}
+          totalMinutes={task.duration_minutes || 0}
+          resourceName={selectedResourceForModal.name}
+          resourceId={selectedResourceForModal.id}
+          resourceHourlyRate={selectedResourceForModal.hourly_rate || 0}
+          resourceDailyCapacityMinutes={selectedResourceForModal.daily_capacity_minutes || 540}
+          onConfirm={handlePlannerConfirm}
+          onCancel={handlePlannerCancel}
+          editMode={existingFragmentsForEdit.length > 0}
+          existingFragments={existingFragmentsForEdit}
+        />
+      )}
+
+      {/* 🌊 ONDA 5: Modais antigos DESATIVADOS (mantidos para possível reativação) */}
+      {/*
+      {showWeekendModal && weekendDays.length > 0 && selectedResourceForModal && (
+        <WeekendDecisionModal
+          weekends={weekendDays}
+          resourceName={selectedResourceForModal.name}
+          resourceHourlyRate={selectedResourceForModal.hourly_rate || 0}
+          taskName={task.name}
+          totalMinutes={task.duration_minutes || 0}
+          onConfirm={handleWeekendDecisions}
+          onCancel={handleCancelWeekendDecision}
+        />
+      )}
+
       {showMultiDayModal && multiDayPlan && selectedResourceForModal && (
         <MultiDayAllocationModal
           plan={multiDayPlan}
@@ -943,6 +1285,7 @@ export default function AllocationModal({
           onCancel={handleCancelMultiDayDecision}
         />
       )}
+      */}
 
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
@@ -970,49 +1313,135 @@ export default function AllocationModal({
           </div>
         ) : (
           <div className="p-6 space-y-6">
-            {/* Alocações Existentes */}
-            {allocationsWithResources.length > 0 && (
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3">
-                  Pessoas Alocadas ({allocationsWithResources.length})
-                </h4>
-                <div className="space-y-2">
-                  {allocationsWithResources.map(allocation => {
-                    const resource = allocation.resource!
-                    return (
-                      <div
-                        key={allocation.id}
-                        className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border"
-                      >
-                        <div className="flex items-center space-x-3 flex-1">
-                          <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-medium">
-                            {resource.name.charAt(0).toUpperCase()}
+            {/* Alocações Existentes - 🌊 ONDA 5.2 */}
+            {allocationsWithResources.length > 0 && (() => {
+              // Agrupar alocações por recurso (para mostrar fragmentação)
+              const allocationsByResource = allocationsWithResources.reduce((acc, allocation) => {
+                const resourceId = allocation.resource_id
+                if (!acc[resourceId]) {
+                  acc[resourceId] = []
+                }
+                acc[resourceId].push(allocation)
+                return acc
+              }, {} as Record<string, typeof allocationsWithResources>)
+
+              return (
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-3">
+                    Pessoas Alocadas ({Object.keys(allocationsByResource).length})
+                  </h4>
+                  <div className="space-y-2">
+                    {Object.entries(allocationsByResource).map(([resourceId, resourceAllocations]) => {
+                      const resource = resourceAllocations[0].resource!
+                      const isFragmented = resourceAllocations.length > 1
+
+                      // Ordenar fragmentos por data
+                      const sortedFragments = [...resourceAllocations].sort(
+                        (a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+                      )
+
+                      // Calcular total de minutos
+                      const totalMinutes = sortedFragments.reduce(
+                        (sum, frag) => sum + (frag.allocated_minutes ?? 0) + (frag.overtime_minutes || 0),
+                        0
+                      )
+
+                      // Montar descrição dos fragmentos
+                      const fragmentDescription = isFragmented
+                        ? `${sortedFragments.length} fragmentos: ${sortedFragments.map((frag, idx) => {
+                            const start = new Date(frag.start_date + 'T00:00:00')
+                            const end = new Date(frag.end_date + 'T00:00:00')
+                            const isSameDate = frag.start_date === frag.end_date
+
+                            if (isSameDate) {
+                              return start.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+                            } else {
+                              return `${start.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}-${end.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`
+                            }
+                          }).join(', ')}`
+                        : `${new Date(sortedFragments[0].start_date + 'T00:00:00').toLocaleDateString('pt-BR')} - ${new Date(sortedFragments[0].end_date + 'T00:00:00').toLocaleDateString('pt-BR')}`
+
+                      // Verificar se tem overtime
+                      const hasOvertime = sortedFragments.some(f => (f.overtime_minutes || 0) > 0)
+
+                      return (
+                        <div
+                          key={resourceId}
+                          className="p-3 bg-gray-50 rounded-lg border"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center space-x-3 flex-1">
+                              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-medium">
+                                {resource.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-medium text-gray-900">{resource.name}</p>
+                                <p className="text-xs text-gray-500">
+                                  {resource.hierarchy === 'gerente' ? '👔 Gerente' :
+                                   resource.hierarchy === 'lider' ? '👨‍💼 Líder' :
+                                   '👷 Operador'}
+                                  {resource.role && ` - ${resource.role}`}
+                                </p>
+                              </div>
+                              <span className={`px-2 py-1 text-xs rounded-full ${PRIORITY_CONFIG[sortedFragments[0].priority].color}`}>
+                                {PRIORITY_CONFIG[sortedFragments[0].priority].label}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex-1">
-                            <p className="font-medium text-gray-900">{resource.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {resource.hierarchy === 'gerente' ? '👔 Gerente' :
-                               resource.hierarchy === 'lider' ? '👨‍💼 Líder' :
-                               '👷 Operador'}
-                              {resource.role && ` - ${resource.role}`}
+
+                          {/* Informações de Fragmentação */}
+                          <div className="ml-13 mb-2 space-y-1">
+                            <p className="text-xs text-gray-600">
+                              📅 {fragmentDescription}
+                            </p>
+                            <p className="text-xs text-gray-600">
+                              ⏱️ Total: {formatMinutes(totalMinutes)}
+                              {hasOvertime && <span className="ml-1 text-orange-600 font-semibold">+ Hora Extra</span>}
                             </p>
                           </div>
-                          <span className={`px-2 py-1 text-xs rounded-full ${PRIORITY_CONFIG[allocation.priority].color}`}>
-                            {PRIORITY_CONFIG[allocation.priority].label}
-                          </span>
+
+                          {/* Botões de Ação */}
+                          <div className="ml-13 flex gap-2">
+                            <button
+                              onClick={() => openPlannerForEdit(resourceId)}
+                              className="px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded transition-colors border border-blue-300"
+                            >
+                              ✏️ Editar
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`Deseja remover todas as alocações de ${resource.name}?`)) return
+
+                                try {
+                                  // Deletar TODAS as alocações deste recurso nesta tarefa
+                                  const { error } = await supabase
+                                    .from('allocations')
+                                    .delete()
+                                    .eq('task_id', task.id)
+                                    .eq('resource_id', resourceId)
+
+                                  if (error) throw error
+
+                                  showSuccessAlert('Alocações removidas com sucesso')
+                                  await refreshAllocations()
+                                  onSuccess()
+                                } catch (error) {
+                                  logError(error, 'removeAllocations')
+                                  showErrorAlert(error, ErrorContext.ALLOCATION_DELETE)
+                                }
+                              }}
+                              className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+                            >
+                              Remover
+                            </button>
+                          </div>
                         </div>
-                        <button
-                          onClick={() => handleRemoveAllocation(allocation.id)}
-                          className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded transition-colors ml-2"
-                        >
-                          Remover
-                        </button>
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              )
+            })()}
 
             {/* Nova Alocação */}
             <div>

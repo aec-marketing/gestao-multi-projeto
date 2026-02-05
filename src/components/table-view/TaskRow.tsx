@@ -7,6 +7,7 @@ import { TaskCostCell } from './TaskCostCell'
 import { TaskActionsMenu } from './TaskActionsMenu'
 import { NewSubtaskRow } from './NewSubtaskRow'
 import { WorkTypeCell } from '@/components/ui/WorkTypeSelect'
+import { TaskTypeCell } from './TaskTypeCell'
 import { formatTaskType, getTaskColorClass } from './utils'
 import { WorkType } from '@/utils/workType.utils'
 
@@ -88,17 +89,7 @@ export const TaskRow = React.memo(function TaskRow({
     [allocations, task.id]
   )
 
-  // ONDA 3: Estado para controlar dropdown de fragmentos
-  const [expandedResourceId, setExpandedResourceId] = React.useState<string | null>(null)
-
-  // Fechar dropdown ao clicar fora
-  React.useEffect(() => {
-    const handleClickOutside = () => setExpandedResourceId(null)
-    if (expandedResourceId) {
-      document.addEventListener('click', handleClickOutside)
-      return () => document.removeEventListener('click', handleClickOutside)
-    }
-  }, [expandedResourceId])
+  // 🌊 ONDA 5.2: Removido dropdown - clique agora abre Planner diretamente
 
   return (
     <>
@@ -124,9 +115,12 @@ export const TaskRow = React.memo(function TaskRow({
 
         {/* Tipo */}
         <td className="px-4 py-2">
-          <span className={`px-2 py-1 rounded text-xs font-medium ${getTaskColorClass(task.type)}`}>
-            {formatTaskType(task.type)}
-          </span>
+          <TaskTypeCell
+            value={task.type as any}
+            onChange={(newValue) => onFieldChange(task.id, 'type', newValue, task.type, task.name)}
+            disabled={hasSubtasks}
+            hasPendingChange={hasChange(task.id, 'type')}
+          />
         </td>
 
         {/* Categoria (Work Type) - ONDA 3 */}
@@ -189,12 +183,12 @@ export const TaskRow = React.memo(function TaskRow({
           </div>
         </td>
 
-        {/* Pessoas - ONDA 3: Badges clicáveis para editar alocação */}
+        {/* Pessoas - 🌊 ONDA 5.2: Badges clicáveis abrem Planner diretamente (sem dropdown) */}
         <td className="px-4 py-2">
           <div className="flex items-center gap-2">
             <div className="flex flex-wrap gap-1 flex-1">
               {(() => {
-                // ONDA 3: Agrupar alocações por recurso para evitar duplicação em fragmentação
+                // Agrupar alocações por recurso para evitar duplicação em fragmentação
                 const allocationsByResource = taskAllocations.reduce((acc, alloc) => {
                   const resourceId = alloc.resource_id
                   if (!acc[resourceId]) {
@@ -207,75 +201,26 @@ export const TaskRow = React.memo(function TaskRow({
                 return Object.entries(allocationsByResource).map(([resourceId, allocs]) => {
                   const resource = resources.find(r => r.id === resourceId)
                   const isFragmented = allocs.length > 1
-                  const isExpanded = expandedResourceId === resourceId
 
-                  // Se não fragmentado, abrir modal diretamente
-                  // Se fragmentado, expandir dropdown
+                  // 🌊 ONDA 5.2: Abre modal de alocação (que mostra fragmentos e botão "Editar")
                   const handleClick = () => {
-                    if (isFragmented) {
-                      setExpandedResourceId(isExpanded ? null : resourceId)
-                    } else {
-                      onOpenAllocation(task.id, allocs[0].id)
-                    }
+                    onOpenAllocation(task.id)
                   }
 
                   return (
-                    <div key={resourceId} className="relative">
-                      <button
-                        onClick={handleClick}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 font-medium hover:bg-blue-200 transition-colors cursor-pointer"
-                        title={isFragmented ? `${resource?.name || 'N/A'} - Fragmentado em ${allocs.length} alocações (clique para ver)` : 'Clique para editar alocação'}
-                      >
-                        <span>{resource?.name || 'N/A'}</span>
-                        {isFragmented && (
-                          <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] bg-blue-600 text-white rounded-full font-bold">
-                            {allocs.length}
-                          </span>
-                        )}
-                      </button>
-
-                      {/* Dropdown com fragmentos */}
-                      {isFragmented && isExpanded && (
-                        <div className="absolute z-50 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg min-w-[200px]">
-                          <div className="p-2 border-b bg-gray-50 text-xs font-semibold text-gray-700">
-                            Fragmentos de {resource?.name}
-                          </div>
-                          <div className="p-1">
-                            {allocs
-                              .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())
-                              .map((alloc, index) => {
-                                const hasOvertime = (alloc.overtime_minutes || 0) > 0
-                                return (
-                                  <button
-                                    key={alloc.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      onOpenAllocation(task.id, alloc.id)
-                                      setExpandedResourceId(null)
-                                    }}
-                                    className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 rounded transition-colors flex items-center justify-between group"
-                                  >
-                                    <div className="flex-1">
-                                      <div className="font-medium text-gray-900">
-                                        Fragmento {index + 1}/{allocs.length}
-                                      </div>
-                                      <div className="text-gray-500 mt-0.5">
-                                        {new Date(alloc.start_date + 'T00:00:00').toLocaleDateString('pt-BR')}
-                                        {' · '}
-                                        {Math.floor((alloc.allocated_minutes || 0) / 60)}h{((alloc.allocated_minutes || 0) % 60).toString().padStart(2, '0')}m
-                                        {hasOvertime && <span className="ml-1 text-orange-600 font-semibold">+ HORA EXTRA</span>}
-                                      </div>
-                                    </div>
-                                    <svg className="w-4 h-4 text-gray-400 group-hover:text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                    </svg>
-                                  </button>
-                                )
-                              })}
-                          </div>
-                        </div>
+                    <button
+                      key={resourceId}
+                      onClick={handleClick}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 font-medium hover:bg-blue-200 transition-colors cursor-pointer"
+                      title={isFragmented ? `${resource?.name || 'N/A'} - ${allocs.length} fragmento(s) · Clique para ver detalhes` : 'Clique para ver detalhes da alocação'}
+                    >
+                      <span>{resource?.name || 'N/A'}</span>
+                      {isFragmented && (
+                        <span className="inline-flex items-center justify-center w-4 h-4 text-[10px] bg-blue-600 text-white rounded-full font-bold">
+                          {allocs.length}
+                        </span>
                       )}
-                    </div>
+                    </button>
                   )
                 })
               })()}

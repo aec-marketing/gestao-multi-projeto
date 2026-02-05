@@ -54,9 +54,9 @@ export function TimeInput({
   // Atualizar display quando valor externo muda
   useEffect(() => {
     if (!isFocused) {
-      setInputValue(formatMinutes(value, 'short'))
+      setInputValue(formatMinutes(value, 'short', workType))
     }
-  }, [value, isFocused])
+  }, [value, isFocused, workType])
 
   // Auto-focus se solicitado
   useEffect(() => {
@@ -72,7 +72,7 @@ export function TimeInput({
     if (value % MINUTES_PER_WORKING_DAY === 0) {
       setInputValue(`${value / MINUTES_PER_WORKING_DAY}d`)
     } else {
-      setInputValue(formatMinutes(value, 'short'))
+      setInputValue(formatMinutes(value, 'short', workType))
     }
     // Selecionar todo o texto para facilitar edição
     setTimeout(() => {
@@ -90,13 +90,13 @@ export function TimeInput({
     if (!validation.valid) {
       setError(validation.error || 'Valor inválido')
       // Reverter para valor anterior
-      setInputValue(formatMinutes(value, 'short'))
+      setInputValue(formatMinutes(value, 'short', workType))
       setTimeout(() => setError(null), 3000)
     } else if (validation.minutes !== undefined) {
       // Validar para o tipo de trabalho
       if (workType === 'milestone' && validation.minutes !== 0) {
         setError('Marcos devem ter duração zero')
-        setInputValue(formatMinutes(value, 'short'))
+        setInputValue(formatMinutes(value, 'short', workType))
         setTimeout(() => setError(null), 3000)
       } else if (workType !== 'milestone' && validation.minutes === 0) {
         setError('Duração deve ser maior que zero')
@@ -229,16 +229,16 @@ export function TimeInputInline({
   // Atualizar display quando valor externo muda
   useEffect(() => {
     if (!isFocused) {
-      setInputValue(formatMinutes(value, 'short'))
+      setInputValue(formatMinutes(value, 'short', workType))
     }
-  }, [value, isFocused])
+  }, [value, isFocused, workType])
 
   const handleFocus = () => {
     setIsFocused(true)
     if (value % MINUTES_PER_WORKING_DAY === 0) {
       setInputValue(`${value / MINUTES_PER_WORKING_DAY}d`)
     } else {
-      setInputValue(formatMinutes(value, 'short'))
+      setInputValue(formatMinutes(value, 'short', workType))
     }
     setTimeout(() => {
       inputRef.current?.select()
@@ -256,7 +256,7 @@ export function TimeInputInline({
     } else if (validation.minutes !== undefined) {
       if (workType === 'milestone' && validation.minutes !== 0) {
         setError('Marcos devem ter duração zero')
-        setInputValue(formatMinutes(value, 'short'))
+        setInputValue(formatMinutes(value, 'short', workType))
         setTimeout(() => setError(null), 3000)
       } else if (workType !== 'milestone' && validation.minutes === 0) {
         setError('Duração deve ser maior que zero')
@@ -330,13 +330,42 @@ export function TimeInputInline({
 interface TimeDisplayProps {
   value: number // em minutos
   format?: 'auto' | 'short' | 'long'
+  workType?: 'work' | 'wait' | 'milestone'
+  showIndicator?: boolean // Mostrar indicador de horas/dia (ex: "1d|9h")
   className?: string
 }
 
-export function TimeDisplay({ value, format = 'auto', className = '' }: TimeDisplayProps) {
+export function TimeDisplay({
+  value,
+  format = 'auto',
+  workType = 'work',
+  showIndicator = true,
+  className = ''
+}: TimeDisplayProps) {
+  const formattedValue = formatMinutes(value, format, workType)
+
+  // Mostrar indicador apenas se tiver dias na duração e showIndicator = true
+  const minutesPerDay = workType === 'wait' ? 1440 : 540
+  const shouldShowIndicator = showIndicator && value >= minutesPerDay
+
+  if (!shouldShowIndicator) {
+    return (
+      <span className={`text-gray-900 ${className}`}>
+        {formattedValue}
+      </span>
+    )
+  }
+
+  // Determinar o indicador baseado no workType
+  const indicator = workType === 'wait' ? '24h' : '9h'
+  const indicatorColor = workType === 'wait' ? 'text-yellow-400' : 'text-blue-400'
+
   return (
-    <span className={`text-gray-900 ${className}`}>
-      {formatMinutes(value, format)}
+    <span className={`inline-flex items-center gap-1 text-gray-900 ${className}`}>
+      <span>{formattedValue}</span>
+      <span className={`text-[10px] ${indicatorColor} opacity-60 font-mono`}>
+        |{indicator}
+      </span>
     </span>
   )
 }

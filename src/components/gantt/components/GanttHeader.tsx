@@ -12,6 +12,8 @@ interface GanttHeaderProps {
   onSyncDates: () => void
   onAuditConflicts: () => void
   onAuditCycles: () => void
+  predecessorEditingMode?: boolean  // ONDA 5.7
+  onTogglePredecessorMode?: () => void  // ONDA 5.7
 }
 
 export function GanttHeader({
@@ -20,7 +22,9 @@ export function GanttHeader({
   dayCount,
   onSyncDates,
   onAuditConflicts,
-  onAuditCycles
+  onAuditCycles,
+  predecessorEditingMode = false,
+  onTogglePredecessorMode
 }: GanttHeaderProps) {
   const router = useRouter()
 
@@ -72,6 +76,21 @@ export function GanttHeader({
           >
             🔄 Auditar Ciclos
           </button>
+
+          {/* ONDA 5.7: Modo de edição de predecessores */}
+          {onTogglePredecessorMode && (
+            <button
+              onClick={onTogglePredecessorMode}
+              className={`px-3 py-1 text-sm rounded transition-all flex items-center gap-2 ${
+                predecessorEditingMode
+                  ? 'bg-purple-600 text-white ring-2 ring-purple-300 shadow-lg'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+              title={predecessorEditingMode ? "Desativar modo de edição de predecessores" : "Ativar modo de edição visual de predecessores"}
+            >
+              {predecessorEditingMode ? '🔗 Modo Ativo' : '🔗 Editar Predecessores'}
+            </button>
+          )}
         </div>
       </div>
     </div>
