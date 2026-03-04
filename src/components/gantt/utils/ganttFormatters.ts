@@ -37,8 +37,8 @@ export function formatTaskTooltip(task: TaskWithDates): string {
   const lines = [
     `📋 ${task.name}`,
     '',
-    `⏱️ Duração: ${formatMinutes(task.duration_minutes, 'auto')}`,
-    `   (${task.duration_minutes} min | ${formatMinutes(task.duration_minutes, 'short')})`,
+    `⏱️ Duração: ${formatMinutes(task.duration_minutes, 'auto', task.work_type)}`,
+    `   (${task.duration_minutes} min | ${formatMinutes(task.duration_minutes, 'short', task.work_type)})`,
     `🏷️ Categoria: ${workTypeLabels[task.work_type] || 'N/A'}`,
     `📅 Início: ${formatDateBR(task.start_date)}`,
     `📅 Fim: ${formatDateBR(task.end_date)}`,
@@ -56,9 +56,9 @@ export function formatTaskTooltipData(task: TaskWithDates) {
     name: task.name,
     duration: {
       minutes: task.duration_minutes,
-      auto: formatMinutes(task.duration_minutes, 'auto'),
-      short: formatMinutes(task.duration_minutes, 'short'),
-      long: formatMinutes(task.duration_minutes, 'long')
+      auto: formatMinutes(task.duration_minutes, 'auto', task.work_type),
+      short: formatMinutes(task.duration_minutes, 'short', task.work_type),
+      long: formatMinutes(task.duration_minutes, 'long', task.work_type)
     },
     workType: workTypeLabels[task.work_type] || 'N/A',
     startDate: formatDateBR(task.start_date),

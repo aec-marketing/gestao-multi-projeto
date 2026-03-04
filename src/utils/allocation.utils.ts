@@ -106,28 +106,11 @@ export function detectCapacityOverflow(
   date: string,
   existingAllocationsMinutes: number = 0
 ): CapacityOverflowResult {
-  console.log('[OVERFLOW-DEBUG] detectCapacityOverflow chamado:', {
-    minutesToAllocate,
-    resourceName: resource.name,
-    date,
-    existingAllocationsMinutes
-  })
-
   // Capacidade diária do recurso (em minutos)
   const dailyCapacityMinutes = resource.daily_capacity_minutes || 540 // Padrão: 9h/dia
 
-  console.log('[OVERFLOW-DEBUG] Capacidade diária:', dailyCapacityMinutes)
-
   // Total de minutos que serão alocados neste dia
   const totalMinutes = existingAllocationsMinutes + minutesToAllocate
-
-  console.log('[OVERFLOW-DEBUG] Cálculo:', {
-    existingAllocationsMinutes,
-    minutesToAllocate,
-    totalMinutes,
-    dailyCapacityMinutes,
-    excede: totalMinutes > dailyCapacityMinutes
-  })
 
   // Verificar se excede
   const hasOverflow = totalMinutes > dailyCapacityMinutes
@@ -141,7 +124,7 @@ export function detectCapacityOverflow(
   // Sugerir multiplicador apropriado
   const suggestedMultiplier = getOvertimeMultiplier(dateObj)
 
-  const result = {
+  return {
     hasOverflow,
     minutesNeeded: minutesToAllocate,
     minutesAvailable: Math.max(0, dailyCapacityMinutes - existingAllocationsMinutes),
@@ -150,10 +133,6 @@ export function detectCapacityOverflow(
     isHoliday: holiday,
     suggestedMultiplier
   }
-
-  console.log('[OVERFLOW-DEBUG] Resultado:', result)
-
-  return result
 }
 
 /**
@@ -393,13 +372,6 @@ export function calculateMultiDayAllocationPlan(
   existingAllocations: Record<string, number> = {},
   useOvertimeByDefault: boolean = false
 ): MultiDayAllocationPlan {
-  console.log('[MULTI-DAY-DEBUG] 🌊 ONDA 4.1: Calculando plano multi-dia COM detecção de fins de semana:', {
-    totalMinutes,
-    resourceName: resource.name,
-    startDate,
-    existingAllocations
-  })
-
   const dailyCapacity = resource.daily_capacity_minutes || 540 // Padrão: 9h/dia
   const hourlyRate = resource.hourly_rate || 0
   const costPerMinute = hourlyRate / 60
@@ -423,23 +395,10 @@ export function calculateMultiDayAllocationPlan(
     const weekend = isWeekend(currentDate)
     const holiday = isHoliday(currentDate)
 
-    console.log('[MULTI-DAY-DEBUG] 📅 Dia:', dateStr, {
-      remainingMinutes,
-      availableCapacity,
-      existingMinutes,
-      isWeekend: weekend,
-      isHoliday: holiday
-    })
-
     // 🌊 ONDA 4.1: DETECTAR FIM DE SEMANA (não pular automaticamente!)
     if (weekend && remainingMinutes > 0) {
       weekendsDetected++
       requiresWeekendDecision = true
-      console.log('[WEEKEND-DEBUG] 🏖️ FIM DE SEMANA DETECTADO:', {
-        date: dateStr,
-        remainingMinutes,
-        weekendsDetected
-      })
     }
 
     // Determinar quantos minutos alocar neste dia
@@ -452,8 +411,6 @@ export function calculateMultiDayAllocationPlan(
     // 🌊 ONDA 4.1: Se for fim de semana, NÃO alocar por padrão (usuário decide depois)
     if (weekend) {
       // Por padrão, pular fim de semana (usuário pode decidir trabalhar depois)
-      console.log('[WEEKEND-DEBUG] ⏭️ Pulando fim de semana (decisão do usuário necessária)')
-      // Não alocar nada neste dia, avançar para próximo dia
       currentDate.setDate(currentDate.getDate() + 1)
       continue
     }
@@ -502,16 +459,6 @@ export function calculateMultiDayAllocationPlan(
       overflowMinutes
     })
 
-    console.log('[MULTI-DAY-DEBUG] ✅ Dia alocado:', {
-      date: dateStr,
-      normalMinutes,
-      overtimeMinutes,
-      overtimeMultiplier,
-      hasOverflow,
-      overflowMinutes,
-      remainingMinutes
-    })
-
     // 🌊 ONDA 4.1: Avançar para o próximo dia (SEM pular fins de semana)
     currentDate.setDate(currentDate.getDate() + 1)
 
@@ -541,17 +488,6 @@ export function calculateMultiDayAllocationPlan(
     requiresUserDecision,
     requiresWeekendDecision, // 🌊 ONDA 4.1
     weekendsDetected // 🌊 ONDA 4.1
-  }
-
-  console.log('[MULTI-DAY-DEBUG] 🎉 Plano completo:', plan)
-
-  // 🌊 ONDA 4.1: Log específico para fins de semana
-  if (requiresWeekendDecision) {
-    console.log('[WEEKEND-DEBUG] 🏖️ RESUMO DE FINS DE SEMANA:', {
-      weekendsDetected,
-      requiresWeekendDecision,
-      message: `${weekendsDetected} fim(ns) de semana detectado(s) - decisão do usuário necessária`
-    })
   }
 
   return plan

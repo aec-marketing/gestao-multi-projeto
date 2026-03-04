@@ -2,6 +2,7 @@
 
 import { supabase } from '@/lib/supabase'
 import { calculateDurationFromDates } from '@/utils/taskDateSync'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface TaskUpdate {
   id: string
@@ -51,7 +52,7 @@ export default function RecalculateModal({
 
       onApply()
     } catch (error) {
-      alert('Erro ao aplicar recalculações: ' + (error as Error).message)
+      dispatchToast('Erro ao aplicar recalculações: ' + (error as Error).message, 'error')
     }
   }
 

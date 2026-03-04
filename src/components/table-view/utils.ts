@@ -5,7 +5,22 @@
 /**
  * Formata tipo de tarefa para exibição amigável
  */
+const TASK_TYPE_LABELS: Record<string, string> = {
+  'projeto_mecanico': 'Projeto Mecânico',
+  'compras_mecanica': 'Compras Mecânica',
+  'projeto_eletrico': 'Projeto Elétrico',
+  'compras_eletrica': 'Compras Elétrica',
+  'fabricacao': 'Fabricação',
+  'tratamento_superficial': 'Tratamento Superficial',
+  'montagem_mecanica': 'Montagem Mecânica',
+  'montagem_eletrica': 'Montagem Elétrica',
+  'coleta': 'Coleta',
+  'subtarefa': 'Subtarefa',
+  'lista_compras': '🛒 Lista de Compras',
+}
+
 export function formatTaskType(type: string): string {
+  if (TASK_TYPE_LABELS[type]) return TASK_TYPE_LABELS[type]
   return type
     .split('_')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -26,7 +41,8 @@ export function getTaskColorClass(type: string): string {
     'montagem_mecanica': 'bg-indigo-100 text-indigo-800',
     'montagem_eletrica': 'bg-red-100 text-red-800',
     'coleta': 'bg-teal-100 text-teal-800',
-    'subtarefa': 'bg-gray-100 text-gray-800'
+    'subtarefa': 'bg-gray-100 text-gray-800',
+    'lista_compras': 'bg-orange-100 text-orange-800'
   }
   return colors[type] || 'bg-gray-100 text-gray-800'
 }

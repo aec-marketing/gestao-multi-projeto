@@ -5,7 +5,6 @@ import { useCalendarDates, TimelineZoom } from '@/hooks/calendar/useCalendarDate
 import { useCalendarFilters } from '@/hooks/calendar/useCalendarFilters'
 import { useCalendarData } from '@/hooks/calendar/useCalendarData'
 import { usePersonalEvents } from '@/hooks/useResources'
-import { getCurrentMonth } from '@/utils/calendar/calendar.utils'
 import CalendarHeader from './CalendarHeader'
 import TimelineView from './TimelineView'
 import ProjectsView from './ProjectsView'
@@ -17,7 +16,7 @@ import PersonalEventModal from '../modals/PersonalEventModal'
  */
 export default function CalendarLayout() {
   // Month navigation state
-  const [currentMonth, setCurrentMonth] = useState<Date>(getCurrentMonth())
+  const [currentMonth, setCurrentMonth] = useState<Date>(new Date())
 
   // Zoom state
   const [zoom, setZoom] = useState<TimelineZoom>('month')
@@ -130,6 +129,7 @@ export default function CalendarLayout() {
         onResetFilters={resetFilters}
         hasActiveFilters={hasActiveFilters}
         onAddEvent={handleAddEventClick}
+        hideZoom={activeTab === 'projects'}
       />
 
       {/* Tab navigation (future: Timeline | Projects) */}
@@ -174,6 +174,7 @@ export default function CalendarLayout() {
         ) : activeTab === 'timeline' ? (
           <TimelineView
             dateRange={dateRange}
+            zoom={zoom}
             groupedResources={groupedResources}
             eventsByResource={eventsByResource}
             personalEventsByResource={personalEventsByResource}
@@ -184,6 +185,7 @@ export default function CalendarLayout() {
         ) : (
           <ProjectsView
             dateRange={dateRange}
+            currentMonth={currentMonth}
             eventsByResource={eventsByResource}
             personalEventsByResource={personalEventsByResource}
             totalResources={allResources.length}

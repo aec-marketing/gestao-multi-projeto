@@ -125,8 +125,9 @@ export const GanttTaskBar = React.memo(function GanttTaskBar({
   }
 
   // Duração efetiva (considerar tempDuration durante resize)
+  const minutesPerDay = task.work_type === 'wait' ? 1440 : 540
   const effectiveDurationMinutes = tempDuration
-    ? Math.round(tempDuration * 540) // Converter dias temporários para minutos
+    ? Math.round(tempDuration * minutesPerDay) // Converter dias temporários para minutos
     : task.duration_minutes
 
   // Ícone baseado no work_type (ONDA 3)
@@ -154,7 +155,7 @@ export const GanttTaskBar = React.memo(function GanttTaskBar({
         {/* ONDA 3: Usar fragmentLabel se for fragmento, senão usar task.name */}
         <span className="flex-1 truncate">{fragmentLabel || task.name}</span>
         <span className="ml-2 text-[10px] opacity-75 font-mono">
-          {formatMinutes(effectiveDurationMinutes, 'short')}
+          {formatMinutes(effectiveDurationMinutes, 'short', task.work_type)}
         </span>
         {/* ONDA 3: Indicador de fragmento */}
         {isFragment && (

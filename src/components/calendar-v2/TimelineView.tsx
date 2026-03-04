@@ -7,6 +7,7 @@ import TimelineHeader from './TimelineHeader'
 import TimelineResourceRow from './TimelineResourceRow'
 import ResourceGroupHeader from './ResourceGroupHeader'
 import { generateProjectColorMap, PROJECT_COLORS } from './TimelineTaskBar'
+import { TimelineZoom } from './TimelineZoomControl'
 
 interface GroupedResources {
   gerente: Array<{ id: string; name: string; hierarchy: string; role: string | null }>
@@ -16,6 +17,7 @@ interface GroupedResources {
 
 interface TimelineViewProps {
   dateRange: Date[]
+  zoom?: TimelineZoom
   groupedResources: GroupedResources
   eventsByResource: Map<string, CalendarEvent[]>
   personalEventsByResource: Map<string, PersonalEvent[]>
@@ -30,6 +32,7 @@ interface TimelineViewProps {
  */
 export default function TimelineView({
   dateRange,
+  zoom = 'month',
   groupedResources,
   eventsByResource,
   personalEventsByResource,
@@ -94,6 +97,7 @@ export default function TimelineView({
                 key={resource.id}
                 resource={resource}
                 dateRange={dateRange}
+                zoom={zoom}
                 events={events}
                 personalEvents={personalEvents}
                 projectColorMap={projectColorMap}
@@ -110,7 +114,7 @@ export default function TimelineView({
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Timeline header (sticky) */}
-      <TimelineHeader dateRange={dateRange} />
+      <TimelineHeader dateRange={dateRange} zoom={zoom} />
 
       {/* Scrollable content area */}
       <div className="flex-1 overflow-auto">

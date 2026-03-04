@@ -6,6 +6,7 @@
 import { useState, useCallback } from 'react'
 import { Task } from '@/types/database.types'
 import { supabase } from '@/lib/supabase'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 export function useGanttDragDrop(
   tasks: Task[],
@@ -52,7 +53,7 @@ export function useGanttDragDrop(
       onRefresh()
     } catch (error) {
       console.error('Error reordering tasks:', error)
-      alert('Erro ao reordenar tarefas')
+      dispatchToast('Erro ao reordenar tarefas', 'error')
     }
   }, [tasks, onRefresh])
 

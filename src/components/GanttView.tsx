@@ -6,6 +6,7 @@ import { Project, Task, Resource } from '@/types/database.types'
 import { Allocation } from '@/types/allocation.types'
 import AllocationModal from './AllocationModal'
 import { parseLocalDate, formatDateBR } from '@/utils/date.utils'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 import SubtaskManager from './SubtaskManager'
 
 interface GanttViewProps {
@@ -424,7 +425,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
 
       loadProjectData()
     } catch (error) {
-      alert('Erro ao excluir subtarefa')
+      dispatchToast('Erro ao excluir subtarefa', 'error')
     }
   }
 
@@ -928,7 +929,7 @@ const [editingCostsTask, setEditingCostsTask] = useState<Task | null>(null)
                     .eq('id', editingCostsTask.id)
 
                   if (error) {
-                    alert('Erro ao salvar custos')
+                    dispatchToast('Erro ao salvar custos', 'error')
                   } else {
                     setEditingCostsTask(null)
                     loadProjectData()

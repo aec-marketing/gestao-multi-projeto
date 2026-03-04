@@ -246,12 +246,11 @@ export async function importMSProject(
               c.start_date < min ? c.start_date : min, validChildren[0].start_date)
             const maxEnd = validChildren.reduce((max, c) =>
               c.end_date > max ? c.end_date : max, validChildren[0].end_date)
-            const totalDurationMinutes = children.reduce((sum, c) => sum + (c.duration_minutes || 0), 0)
-
-            // Calcular duration em dias
+            // Calcular span (diferença de datas), nunca somar durações dos filhos
             const startDate = new Date(minStart)
             const endDate = new Date(maxEnd)
             const durationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+            const spanMinutes = durationDays * 540 // base 9h/dia para tarefas pai work
 
             // Atualizar tarefa pai
             await supabase
@@ -260,7 +259,7 @@ export async function importMSProject(
                 start_date: minStart,
                 end_date: maxEnd,
                 duration: durationDays,
-                duration_minutes: totalDurationMinutes
+                duration_minutes: spanMinutes
               })
               .eq('id', parent.id)
           }

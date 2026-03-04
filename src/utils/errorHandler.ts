@@ -3,6 +3,7 @@
  */
 
 import { log } from './logger'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 export interface AppError {
   message: string
@@ -81,14 +82,14 @@ export function showErrorAlert(error: unknown, context?: string): void {
     ? handleSupabaseError(error, context)
     : formatErrorMessage(error)
 
-  alert(`❌ ${message}`)
+  dispatchToast(message, 'error')
 }
 
 /**
  * Shows a success alert
  */
 export function showSuccessAlert(message: string): void {
-  alert(`✅ ${message}`)
+  dispatchToast(message, 'success')
 }
 
 /**

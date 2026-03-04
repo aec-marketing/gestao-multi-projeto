@@ -6,6 +6,7 @@ import { PRIORITY_CONFIG } from '@/types/allocation.types'
 import { formatDateBR } from '@/utils/date.utils'
 import { useActiveResources, useAllocations, usePersonalEvents } from '@/hooks/useResources'
 import { useResourceContext } from '@/contexts/ResourceContext'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface ResourceManagerProps {
   onClose: () => void
@@ -337,13 +338,13 @@ function ResourceDetailsPanel({
       resource.daily_capacity_minutes = editedDailyCapacity
 
       setIsEditing(false)
-      alert('Alterações salvas com sucesso!')
+      dispatchToast('Alterações salvas com sucesso!', 'success')
 
       // Recarregar a página para atualizar todos os dados
       window.location.reload()
     } catch (error) {
       console.error('Erro ao salvar:', error)
-      alert('Erro ao salvar alterações')
+      dispatchToast('Erro ao salvar alterações', 'error')
     } finally {
       setIsSaving(false)
     }

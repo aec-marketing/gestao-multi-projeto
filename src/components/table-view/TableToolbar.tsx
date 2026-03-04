@@ -10,6 +10,7 @@ interface TableToolbarProps {
   resultCount: number
   onAddTask: () => void
   isAddingTask: boolean
+  onAddPurchaseList?: () => void
 }
 
 /**
@@ -24,7 +25,8 @@ export const TableToolbar = React.memo(function TableToolbar({
   onToggleSortOrder,
   resultCount,
   onAddTask,
-  isAddingTask
+  isAddingTask,
+  onAddPurchaseList,
 }: TableToolbarProps) {
   return (
     <div className="p-6 border-b space-y-4">
@@ -76,19 +78,34 @@ export const TableToolbar = React.memo(function TableToolbar({
         )}
       </div>
 
-      {/* Add task button */}
+      {/* Add task buttons */}
       {!searchTerm && (
-        <button
-          onClick={onAddTask}
-          disabled={isAddingTask}
-          className={`text-sm font-medium transition-colors ${
-            isAddingTask
-              ? 'text-gray-400 cursor-not-allowed'
-              : 'text-blue-600 hover:text-blue-700'
-          }`}
-        >
-          {isAddingTask ? '✏️ Editando...' : '+ Adicionar Nova Tarefa'}
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={onAddTask}
+            disabled={isAddingTask}
+            className={`text-sm font-medium transition-colors ${
+              isAddingTask
+                ? 'text-gray-400 cursor-not-allowed'
+                : 'text-blue-600 hover:text-blue-700'
+            }`}
+          >
+            {isAddingTask ? '✏️ Editando...' : '+ Adicionar Nova Tarefa'}
+          </button>
+          {onAddPurchaseList && (
+            <button
+              onClick={onAddPurchaseList}
+              disabled={isAddingTask}
+              className={`text-sm font-medium transition-colors ${
+                isAddingTask
+                  ? 'text-gray-400 cursor-not-allowed'
+                  : 'text-orange-600 hover:text-orange-700'
+              }`}
+            >
+              🛒 Lista de Compras
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

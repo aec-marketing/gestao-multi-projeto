@@ -58,7 +58,7 @@ export function Toast({ message, type = 'info', onClose, duration = 2000 }: Toas
           animation: slideUp 0.3s ease-out;
         }
       `}</style>
-      <div className="fixed bottom-4 right-4 z-[100] animate-slide-up">
+      <div className="animate-slide-up">
       <div className={`${style.bg} text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 min-w-[250px]`}>
         {type === 'saving' ? (
           <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>

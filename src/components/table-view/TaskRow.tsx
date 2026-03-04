@@ -68,6 +68,23 @@ export const TaskRow = React.memo(function TaskRow({
   )
   const hasSubtasks = subtasks.length > 0
 
+  // Duração exibida do pai = span (max_end - min_start + 1) calculado dos filhos
+  // Nunca soma durações — igual ao Gantt
+  const spanDurationMinutes = useMemo(() => {
+    if (!hasSubtasks || subtasks.length === 0) return task.duration_minutes || 0
+    const starts = subtasks.map(s => s.start_date ? new Date(s.start_date).getTime() : null).filter(Boolean) as number[]
+    const ends = subtasks.map(s => {
+      if (!s.start_date || !s.duration_minutes) return null
+      const start = new Date(s.start_date).getTime()
+      const minutesPerDay = s.work_type === 'wait' ? 1440 : 540
+      return start + (s.duration_minutes / minutesPerDay - 1) * 86400000
+    }).filter(Boolean) as number[]
+    if (starts.length === 0 || ends.length === 0) return task.duration_minutes || 0
+    const spanDays = Math.round((Math.max(...ends) - Math.min(...starts)) / 86400000) + 1
+    const minutesPerDay = task.work_type === 'wait' ? 1440 : 540
+    return spanDays * minutesPerDay
+  }, [hasSubtasks, task.duration_minutes, task.work_type, subtasks])
+
   // Indentação
   const indentLevel = task.outline_level || level
   const indent = indentLevel * 30
@@ -145,7 +162,7 @@ export const TaskRow = React.memo(function TaskRow({
           <TaskDurationCell
             value={
               hasSubtasks
-                ? (task.duration || 0) * 540  // Pai: mostrar duration (em dias) convertido para minutos
+                ? spanDurationMinutes  // Pai: span calculado dos filhos
                 : getCurrentValue(task.id, 'duration_minutes', task.duration_minutes)  // Filho: duration_minutes editável
             }
             onBlur={(minutes) => onFieldChange(task.id, 'duration_minutes', minutes, task.duration_minutes, task.name)}
@@ -185,6 +202,9 @@ export const TaskRow = React.memo(function TaskRow({
 
         {/* Pessoas - 🌊 ONDA 5.2: Badges clicáveis abrem Planner diretamente (sem dropdown) */}
         <td className="px-4 py-2">
+          {task.type === 'lista_compras' ? (
+            <span className="text-xs text-gray-300">—</span>
+          ) : (
           <div className="flex items-center gap-2">
             <div className="flex flex-wrap gap-1 flex-1">
               {(() => {
@@ -239,6 +259,7 @@ export const TaskRow = React.memo(function TaskRow({
               </button>
             )}
           </div>
+          )}
         </td>
 
         {/* Progresso */}

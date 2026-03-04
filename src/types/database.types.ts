@@ -20,6 +20,7 @@ export type Database = {
           notes: string | null
           client_name: string | null      // Nome do cliente
           client_logo_url: string | null  // URL da logo do cliente
+          sale_value: number | null       // Valor de venda do projeto (R$)
           created_at: string
           updated_at: string
         }
@@ -40,6 +41,7 @@ export type Database = {
           notes?: string | null
           client_name?: string | null
           client_logo_url?: string | null
+          sale_value?: number | null
         }
         Update: {
           id?: string
@@ -58,6 +60,7 @@ export type Database = {
           notes?: string | null
           client_name?: string | null
           client_logo_url?: string | null
+          sale_value?: number | null       // Valor de venda do projeto (R$)
         }
       }
       resources: {
@@ -102,7 +105,7 @@ export type Database = {
           id: string
           project_id: string
           name: string
-          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa'
+          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa' | 'lista_compras'
           parent_id: string | null
 
           // NOVOS CAMPOS - Sistema de Minutos (ONDA 1)
@@ -136,7 +139,7 @@ export type Database = {
           id?: string
           project_id: string
           name: string
-          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa'
+          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa' | 'lista_compras'
           parent_id?: string | null
 
           // NOVOS CAMPOS (Sistema de Minutos)
@@ -163,7 +166,7 @@ export type Database = {
           id?: string
           project_id?: string
           name?: string
-          type?: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa'
+          type?: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa' | 'lista_compras'
           parent_id?: string | null
 
           // NOVOS CAMPOS (Sistema de Minutos)

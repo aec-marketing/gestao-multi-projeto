@@ -17,6 +17,7 @@ type TaskType =
   | 'montagem_eletrica'
   | 'coleta'
   | 'subtarefa'
+  | 'lista_compras'
 
 interface TaskTypeCellProps {
   value: TaskType
@@ -35,7 +36,8 @@ const TASK_TYPE_OPTIONS: { value: TaskType; label: string }[] = [
   { value: 'montagem_mecanica', label: 'Montagem Mecânica' },
   { value: 'montagem_eletrica', label: 'Montagem Elétrica' },
   { value: 'coleta', label: 'Coleta' },
-  { value: 'subtarefa', label: 'Subtarefa' }
+  { value: 'subtarefa', label: 'Subtarefa' },
+  { value: 'lista_compras', label: '🛒 Lista de Compras' }
 ]
 
 export function TaskTypeCell({

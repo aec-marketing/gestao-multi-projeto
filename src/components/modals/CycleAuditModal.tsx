@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { detectCycles, findAllCycles, suggestCycleBreakers, type CycleDetectionResult } from '@/lib/msproject/validation'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface CycleAuditModalProps {
   projectId: string
@@ -59,7 +60,7 @@ export default function CycleAuditModal({
       }
 
     } catch (error) {
-      alert('Erro ao escanear ciclos')
+      dispatchToast('Erro ao escanear ciclos', 'error')
     } finally {
       setScanning(false)
     }
@@ -78,11 +79,11 @@ export default function CycleAuditModal({
 
       if (error) throw error
 
-      alert('✅ Predecessor removido com sucesso!')
+      dispatchToast('Predecessor removido com sucesso!', 'success')
       onRefresh()
       scanForCycles() // Re-escanear
     } catch (error) {
-      alert('Erro ao remover predecessor')
+      dispatchToast('Erro ao remover predecessor', 'error')
     }
   }
 

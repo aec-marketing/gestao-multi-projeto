@@ -12,7 +12,8 @@
       "Bash(npm run dev:*)",
       "Bash(wc:*)",
       "Bash(npm install:*)",
-      "Bash(if not exist docs mkdir docs)"
+      "Bash(if not exist docs mkdir docs)",
+      "Bash(grep -E \"as \\(any|unknown\\)\" ./components/*.tsx ./components/*/*.tsx ./components/*/*/*.tsx ./utils/*.ts)"
     ],
     "deny": [],
     "ask": []

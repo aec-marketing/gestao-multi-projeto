@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase'
 import { parseLocalDate } from '@/utils/date.utils'
 import { auditPredecessorConflicts } from '@/utils/predecessorCalculations'
 import { daysToMinutes } from '@/utils/time.utils'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 export function useGanttSync(
   projectId: string,
@@ -94,10 +95,10 @@ export function useGanttSync(
       }
 
       onRefresh()
-      alert(`✅ Sincronização concluída! ${parentTasks.length} tarefas pai atualizadas.`)
+      dispatchToast(`Sincronização concluída! ${parentTasks.length} tarefas pai atualizadas.`, 'success')
     } catch (error) {
       console.error('Error syncing parent dates:', error)
-      alert('Erro ao sincronizar datas das tarefas pai')
+      dispatchToast('Erro ao sincronizar datas das tarefas pai', 'error')
     }
   }, [projectId, onRefresh])
 
@@ -264,13 +265,13 @@ export function useGanttSync(
       })
 
       if (filteredConflicts.length === 0) {
-        alert('✅ Nenhum conflito de predecessor encontrado!')
+        dispatchToast('Nenhum conflito de predecessor encontrado', 'success')
       } else {
         onPendingUpdates(filteredConflicts)
       }
     } catch (error) {
       console.error('Error auditing conflicts:', error)
-      alert('Erro ao auditar conflitos')
+      dispatchToast('Erro ao auditar conflitos', 'error')
     }
   }, [projectId, onPendingUpdates, syncAllParentDates])
 

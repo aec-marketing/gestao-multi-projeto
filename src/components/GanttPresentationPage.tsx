@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { Task, Project } from '@/types/database.types'
 import { parseLocalDate } from '@/utils/date.utils'
 import { supabase } from '@/lib/supabase'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 import { useRouter } from 'next/navigation'
 
 interface GanttPresentationPageProps {
@@ -54,7 +55,7 @@ export default function GanttPresentationPage({ projectId }: GanttPresentationPa
         setTasks(tasksData || [])
       } catch (error) {
         console.error('Erro ao carregar dados:', error)
-        alert('Erro ao carregar dados do projeto')
+        dispatchToast('Erro ao carregar dados do projeto', 'error')
       } finally {
         setLoading(false)
       }

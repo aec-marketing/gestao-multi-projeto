@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Task } from '@/types/database.types'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface SubtaskManagerProps {
   parentTask: Task
@@ -17,7 +18,7 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
 
   async function handleCreateSubtask() {
     if (!subtaskName.trim()) {
-      alert('Digite um nome para a subtarefa')
+      dispatchToast('Digite um nome para a subtarefa', 'info')
       return
     }
 
@@ -129,7 +130,7 @@ export default function SubtaskManager({ parentTask, onClose, onSuccess }: Subta
       setSubtaskDuration('1')
       onSuccess()
     } catch (error) {
-      alert('Erro ao criar subtarefa')
+      dispatchToast('Erro ao criar subtarefa', 'error')
     } finally {
       setIsCreating(false)
     }

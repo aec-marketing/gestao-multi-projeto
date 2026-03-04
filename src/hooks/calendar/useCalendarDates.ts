@@ -1,6 +1,14 @@
 import { useMemo } from 'react'
 
-export type TimelineZoom = 'day' | 'week' | 'month'
+export type TimelineZoom = 'day' | 'week' | 'month' | 'year'
+
+/**
+ * Generate an array with the first day of each month of the year
+ */
+export function generateYearMonths(referenceDate: Date): Date[] {
+  const year = referenceDate.getFullYear()
+  return Array.from({ length: 12 }, (_, i) => new Date(year, i, 1, 0, 0, 0, 0))
+}
 
 /**
  * Generate an array of dates for the given month
@@ -82,6 +90,8 @@ export function useCalendarDates(currentMonth: Date, zoom: TimelineZoom = 'month
         return generateSingleDay(currentMonth)
       case 'week':
         return generateWeekDays(currentMonth)
+      case 'year':
+        return generateYearMonths(currentMonth)
       case 'month':
       default:
         return generateMonthDays(currentMonth)
@@ -110,6 +120,8 @@ export function useCalendarDates(currentMonth: Date, zoom: TimelineZoom = 'month
         const end = weekDays[6]
         return `${start.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })} - ${end.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' })}`
       }
+      case 'year':
+        return String(currentMonth.getFullYear())
       case 'month':
       default:
         return currentMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })

@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase'
 import { recalculateTasksInCascade, validateTaskStartDate } from '@/utils/predecessorCalculations'
 import RecalculateModal from '@/components/modals/RecalculateModal'
 import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 import TableViewErrorBoundary from '@/components/error-boundary/TableViewErrorBoundary'
 import { LoadingOverlay } from '@/components/ui/LoadingOverlay'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -338,7 +339,7 @@ async function saveAllChanges() {
         type: 'error'
       })
       if (errors.length > 0) {
-        alert(`Alguns erros ocorreram:\n\n${errors.join('\n')}`)
+        dispatchToast('Alguns erros ao salvar. Verifique os dados e tente novamente.', 'error')
       }
     }
   } catch (error) {
@@ -357,7 +358,7 @@ function hasPendingChange(taskId: string, field: string): boolean {
 }
 async function createNewTask() {
   if (!newTaskData.name.trim()) {
-    alert('Nome da tarefa é obrigatório')
+    dispatchToast('Nome da tarefa é obrigatório', 'info')
     return
   }
 
@@ -396,7 +397,7 @@ function cancelNewTask() {
 }
 async function createNewSubtask(parentTaskId: string, parentType: string) {
   if (!newSubtaskData.name.trim()) {
-    alert('Nome da subtarefa é obrigatório')
+    dispatchToast('Nome da subtarefa é obrigatório', 'info')
     return
   }
 

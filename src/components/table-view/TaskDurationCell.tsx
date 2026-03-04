@@ -4,8 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { TimeInputInline, TimeDisplay } from '@/components/ui/TimeInput'
 import { formatMinutes } from '@/utils/time.utils'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface TaskDurationCellProps {
   value: number  // duration_minutes
@@ -34,7 +36,9 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
 }: TaskDurationCellProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [localValue, setLocalValue] = useState(value)
-  const [tooltipPosition, setTooltipPosition] = useState<'top' | 'bottom'>('top')
+  const [tooltipVisible, setTooltipVisible] = useState(false)
+  const [tooltipStyle, setTooltipStyle] = useState<React.CSSProperties>({})
+  const [tooltipArrow, setTooltipArrow] = useState<'top' | 'bottom'>('top')
   const cellRef = React.useRef<HTMLDivElement>(null)
 
   // Sincronizar com valor externo
@@ -42,23 +46,42 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
     setLocalValue(value)
   }, [value])
 
-  // Detectar posição do tooltip baseado na posição da célula na tela
+  // Calcular posição fixed para o tooltip (evita clipping por overflow ou stacking context)
   const handleMouseEnter = () => {
     if (cellRef.current) {
       const rect = cellRef.current.getBoundingClientRect()
-      // Se está nos primeiros 200px da tela, mostrar tooltip ABAIXO
-      if (rect.top < 200) {
-        setTooltipPosition('bottom')
+      const spaceAbove = rect.top
+      const showAbove = spaceAbove > 160
+
+      if (showAbove) {
+        setTooltipStyle({
+          position: 'fixed',
+          bottom: window.innerHeight - rect.top + 8,
+          left: rect.left + rect.width / 2,
+          transform: 'translateX(-50%)',
+        })
+        setTooltipArrow('bottom')
       } else {
-        setTooltipPosition('top')
+        setTooltipStyle({
+          position: 'fixed',
+          top: rect.bottom + 8,
+          left: rect.left + rect.width / 2,
+          transform: 'translateX(-50%)',
+        })
+        setTooltipArrow('top')
       }
+      setTooltipVisible(true)
     }
+  }
+
+  const handleMouseLeave = () => {
+    setTooltipVisible(false)
   }
 
   const handleDoubleClick = () => {
     // Checkpoints (milestones) não podem ter duração editada
     if (workType === 'milestone') {
-      alert('⚠️ Checkpoints devem ter duração zero e não podem ser editados.')
+      dispatchToast('Checkpoints têm duração zero e não podem ser editados', 'info')
       return
     }
 
@@ -170,43 +193,45 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
     )
   }
 
+  // Tooltip renderizado via portal para escapar de qualquer stacking context da tabela
+  const tooltip = tooltipVisible ? createPortal(
+    <div
+      style={{ ...tooltipStyle, zIndex: 99999 }}
+      className="bg-gray-900 text-white text-xs rounded-lg px-4 py-3 shadow-2xl whitespace-nowrap pointer-events-none"
+    >
+      <div className="space-y-1">
+        <p className="font-semibold text-blue-300">Detalhes da duração:</p>
+        <p>• {value} minutos</p>
+        <p>• {formatMinutes(value, 'auto', workType)}</p>
+        <p>• {formatMinutes(value, 'long', workType)}</p>
+        {!isReadOnly && (
+          <p className="text-gray-400 text-xs mt-2 border-t border-gray-700 pt-1">
+            Clique duplo para editar
+          </p>
+        )}
+      </div>
+      {/* Seta adaptativa */}
+      {tooltipArrow === 'bottom' ? (
+        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45 -mt-1" />
+      ) : (
+        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45 -mb-1" />
+      )}
+    </div>,
+    document.body
+  ) : null
+
   // Modo DISPLAY (double-click para editar)
   return (
-    <div ref={cellRef} className="relative group">
+    <div ref={cellRef} className="relative">
       <div
         className={baseClasses}
         onDoubleClick={handleDoubleClick}
         onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
       >
         <TimeDisplay value={value} format="short" workType={workType} />
       </div>
-
-      {/* Tooltip com posicionamento inteligente */}
-      <div
-        className={`
-          absolute hidden group-hover:block bg-gray-900 text-white text-xs rounded-lg px-4 py-3
-          left-1/2 transform -translate-x-1/2 z-[9999] shadow-2xl whitespace-nowrap pointer-events-none
-          ${tooltipPosition === 'top' ? 'bottom-full mb-2' : 'top-full mt-2'}
-        `}
-      >
-        <div className="space-y-1">
-          <p className="font-semibold text-blue-300">Detalhes da duração:</p>
-          <p>• {value} minutos</p>
-          <p>• {formatMinutes(value, 'auto', workType)}</p>
-          <p>• {formatMinutes(value, 'long', workType)}</p>
-          {!isReadOnly && (
-            <p className="text-gray-400 text-xs mt-2 border-t border-gray-700 pt-1">
-              Clique duplo para editar
-            </p>
-          )}
-        </div>
-        {/* Seta adaptativa */}
-        {tooltipPosition === 'top' ? (
-          <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45 -mt-1" />
-        ) : (
-          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45 -mb-1" />
-        )}
-      </div>
+      {tooltip}
     </div>
   )
 })

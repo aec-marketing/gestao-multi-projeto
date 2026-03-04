@@ -3,6 +3,8 @@
 import React, { useState, useCallback } from 'react'
 import { Project } from '@/types/database.types'
 import { useBatchUpdateTasks, useDeleteTask, useCreateTask, useUpdateTask } from '@/queries/tasks.queries'
+import { useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '@/queries/queryKeys'
 import { useTableData } from '@/hooks/table/useTableData'
 import { useTableFilters } from '@/hooks/table/useTableFilters'
 import { usePendingChanges } from '@/hooks/table/usePendingChanges'
@@ -17,6 +19,7 @@ import { LoadingOverlay } from '@/components/ui/LoadingOverlay'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ConfirmModal } from '@/components/modals/ConfirmModal'
 import { DurationAdjustModal, DurationAdjustmentType } from '@/components/modals/DurationAdjustModal'
+import { PurchaseListModal, PurchaseListData } from '@/components/modals/PurchaseListModal'
 import AllocationModal from '@/components/AllocationModal'
 import { applyDurationAdjustment, calculateEndDateFromDuration } from '@/utils/taskDateSync'
 import { generateNextWbsCode } from '@/utils/wbs'
@@ -25,6 +28,7 @@ import { daysToMinutes } from '@/utils/time.utils'
 import { WorkType } from '@/utils/workType.utils'
 import { updateTaskActualCost } from '@/lib/task-cost-service'
 import { supabase } from '@/lib/supabase'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface TableViewTabProps {
   project: Project
@@ -163,6 +167,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
   } = usePendingChanges()
 
   // ==================== MUTATIONS ====================
+  const queryClient = useQueryClient()
   const batchUpdateMutation = useBatchUpdateTasks(project.id)
   const deleteTaskMutation = useDeleteTask(project.id)
   const createTaskMutation = useCreateTask(project.id)
@@ -221,6 +226,10 @@ export default function TableViewTab({ project }: TableViewTabProps) {
     taskId: string
     allocationId?: string  // ONDA 3: ID da alocação para edição (opcional)
   } | null>(null)
+
+  // Purchase List Modal state
+  const [isPurchaseListModalOpen, setIsPurchaseListModalOpen] = useState(false)
+  const [isPurchaseListSaving, setIsPurchaseListSaving] = useState(false)
 
   // ==================== FILTERED TASKS ====================
   const filteredMainTasks = filterAndSort(mainTasks)
@@ -383,7 +392,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
    */
   const handleCreateTask = useCallback(async () => {
     if (!newTaskData.name.trim()) {
-      alert('Digite um nome para a tarefa')
+      dispatchToast('Digite um nome para a tarefa', 'info')
       return
     }
 
@@ -448,7 +457,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
    */
   const handleCreateSubtask = useCallback(async (parentTaskId: string) => {
     if (!newSubtaskData.name.trim()) {
-      alert('Digite um nome para a subtarefa')
+      dispatchToast('Digite um nome para a subtarefa', 'info')
       return
     }
 
@@ -558,6 +567,102 @@ export default function TableViewTab({ project }: TableViewTabProps) {
     // Dados serão recarregados automaticamente via React Query
   }, [])
 
+  /**
+   * Handler para criar lista de compras
+   * Cria uma tarefa pai do tipo 'lista_compras' com work_type 'wait' (dias corridos)
+   * e cada item como uma subtarefa — usa supabase direto para evitar toasts por inserção
+   */
+  const handleCreatePurchaseList = useCallback(async (data: PurchaseListData) => {
+    setIsPurchaseListSaving(true)
+    try {
+      const maxSortOrder = tasks.length > 0
+        ? Math.max(...tasks.map(t => t.sort_order || 0))
+        : 0
+
+      const wbsCode = generateNextWbsCode(tasks, null)
+
+      // Calcular end_date e duração da lista:
+      // span = max(end_date dos itens) - start_date + 1 (dias corridos)
+      // Não soma durações — itens paralelos não adicionam ao span da lista
+      const startDateObj = new Date(data.startDate + 'T00:00:00')
+      const latestEndDateObj = data.items.reduce((latest, item) => {
+        const itemEnd = new Date(data.startDate + 'T00:00:00')
+        itemEnd.setDate(itemEnd.getDate() + item.durationDays - 1)
+        return itemEnd > latest ? itemEnd : latest
+      }, new Date(startDateObj))
+      const listEndDate = latestEndDateObj.toISOString().split('T')[0]
+      // Span em dias corridos = diferença de datas + 1
+      const spanDays = Math.round(
+        (latestEndDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24)
+      ) + 1
+
+      // Criar tarefa pai diretamente via supabase (evita toasts intermediários da mutation)
+      const { data: parentTask, error: parentError } = await supabase
+        .from('tasks')
+        .insert({
+          name: data.listName.trim(),
+          type: 'lista_compras',
+          project_id: project.id,
+          duration_minutes: spanDays * 1440,
+          work_type: 'wait',
+          progress: 0,
+          sort_order: maxSortOrder + 1,
+          parent_id: null,
+          wbs_code: wbsCode,
+          outline_level: 0,
+          start_date: data.startDate,
+          end_date: listEndDate,
+          is_optional: false,
+          is_critical_path: false,
+        })
+        .select()
+        .single()
+
+      if (parentError) throw parentError
+
+      // Criar subtarefas em lote
+      const subtasks = data.items.map((item, i) => {
+        const itemEndDateObj = new Date(data.startDate + 'T00:00:00')
+        itemEndDateObj.setDate(itemEndDateObj.getDate() + item.durationDays - 1)
+        const itemEndDate = itemEndDateObj.toISOString().split('T')[0]
+
+        return {
+          name: item.vendor ? `${item.name} — ${item.vendor}` : item.name.trim(),
+          type: 'subtarefa' as const,
+          project_id: project.id,
+          duration_minutes: item.durationDays * 1440,
+          work_type: 'wait' as const,
+          progress: 0,
+          sort_order: maxSortOrder + 2 + i,
+          parent_id: parentTask.id,
+          wbs_code: `${wbsCode}.${i + 1}`,
+          outline_level: 1,
+          start_date: data.startDate,
+          end_date: itemEndDate,
+          is_optional: false,
+          is_critical_path: false,
+          estimated_cost: item.estimatedCost || 0,
+        }
+      })
+
+      const { error: subtasksError } = await supabase.from('tasks').insert(subtasks)
+      if (subtasksError) throw subtasksError
+
+      // Invalidar cache para recarregar a tabela via React Query
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.tasks.byProject(project.id)
+      })
+
+      setIsPurchaseListModalOpen(false)
+      dispatchToast(`Lista "${data.listName}" criada com ${data.items.length} item(ns)!`, 'success')
+    } catch (error) {
+      console.error('Error creating purchase list:', error)
+      dispatchToast('Erro ao criar lista de compras', 'error')
+    } finally {
+      setIsPurchaseListSaving(false)
+    }
+  }, [tasks, project.id, queryClient])
+
   // ==================== RENDER ====================
   return (
     <TableViewErrorBoundary>
@@ -604,6 +709,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
           resultCount={filteredMainTasks.length}
           onAddTask={() => setIsAddingTask(true)}
           isAddingTask={isAddingTask}
+          onAddPurchaseList={() => setIsPurchaseListModalOpen(true)}
         />
 
         {/* ONDA 1: Resumo de Custos */}
@@ -695,6 +801,15 @@ export default function TableViewTab({ project }: TableViewTabProps) {
         onSave={handleSaveAll}
         onDiscard={clearChanges}
         isSaving={batchUpdateMutation.isPending}
+      />
+
+      {/* Purchase List Modal */}
+      <PurchaseListModal
+        project={project}
+        isOpen={isPurchaseListModalOpen}
+        onClose={() => setIsPurchaseListModalOpen(false)}
+        onConfirm={handleCreatePurchaseList}
+        isLoading={isPurchaseListSaving}
       />
 
       {/* Allocation Modal (ONDA 3: Com suporte a edição) */}

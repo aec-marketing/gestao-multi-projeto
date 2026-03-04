@@ -25,18 +25,19 @@ export interface PredecessorConnection {
 /**
  * Converte conexão de âncoras para tipo de predecessor do banco
  *
- * Regras:
- * - Start → Start (SS): Tarefa começa junto com o começo de outra
- * - Start → End (SF): Tarefa começa quando outra termina (raro, geralmente é FS invertido)
- * - End → Start (FS): Tarefa termina antes de outra começar (PADRÃO)
- * - End → End (FF): Tarefa termina junto com o término de outra
+ * Regras (apenas 3 tipos suportados no banco):
+ * - End → Start (FS): Tarefa termina antes de outra começar (PADRÃO - 'fim_inicio')
+ * - Start → Start (SS): Tarefa começa junto com o começo de outra ('inicio_inicio')
+ * - End → End (FF): Tarefa termina junto com o término de outra ('fim_fim')
+ *
+ * NOTA: Start → End (SF) não é suportado no banco, usa FS como fallback
  */
 function getRelationType(
   sourceAnchor: AnchorType,
   targetAnchor: AnchorType
-): 'fim_inicio' | 'inicio_inicio' | 'fim_fim' | 'inicio_fim' {
+): 'fim_inicio' | 'inicio_inicio' | 'fim_fim' {
   if (sourceAnchor === 'end' && targetAnchor === 'start') {
-    return 'fim_inicio' // FS - predecessor termina → sucessor começa
+    return 'fim_inicio' // FS - predecessor termina → sucessor começa (PADRÃO)
   }
   if (sourceAnchor === 'start' && targetAnchor === 'start') {
     return 'inicio_inicio' // SS - ambas começam juntas
@@ -44,11 +45,8 @@ function getRelationType(
   if (sourceAnchor === 'end' && targetAnchor === 'end') {
     return 'fim_fim' // FF - ambas terminam juntas
   }
-  if (sourceAnchor === 'start' && targetAnchor === 'end') {
-    return 'inicio_fim' // SF - predecessor começa → sucessor termina (raro)
-  }
 
-  // Fallback para FS (mais comum)
+  // Start → End (SF) não é suportado, usar FS como fallback
   return 'fim_inicio'
 }
 

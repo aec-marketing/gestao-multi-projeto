@@ -10,20 +10,40 @@ import { Allocation } from '@/types/allocation.types'
 import { formatDateBR } from '@/utils/date.utils'
 import { formatMinutes } from '@/utils/time.utils'
 import { workTypeLabels } from '../utils/ganttFormatters'
+import { supabase } from '@/lib/supabase'
 
 interface GanttDetailsPanelProps {
   task: Task
   allocations: Array<Allocation & { resource: Resource }>
   onClose: () => void
+  onUpdate?: () => void
 }
 
 export function GanttDetailsPanel({
   task,
   allocations,
-  onClose
+  onClose,
+  onUpdate
 }: GanttDetailsPanelProps) {
   const [isMinimized, setIsMinimized] = useState(false)
+  const [localProgress, setLocalProgress] = useState(task.progress ?? 0)
+  const [isSavingProgress, setIsSavingProgress] = useState(false)
   const workTypeLabel = workTypeLabels[task.work_type || 'work']
+
+  const handleProgressChange = (value: number) => {
+    setLocalProgress(value)
+  }
+
+  const handleProgressSave = async (value: number) => {
+    setIsSavingProgress(true)
+    const { error } = await supabase
+      .from('tasks')
+      .update({ progress: value })
+      .eq('id', task.id)
+
+    setIsSavingProgress(false)
+    if (!error) onUpdate?.()
+  }
 
   // Modo minimizado: apenas header compacto
   if (isMinimized) {
@@ -118,23 +138,37 @@ export function GanttDetailsPanel({
             </div>
           </div>
 
-          {/* Linha 3: Progresso e Tipo */}
-          <div className="flex gap-2 text-xs">
-            <div className="flex-1 bg-white/80 rounded px-2 py-1.5">
-              <div className="flex items-center gap-2">
-                <span className="text-gray-500">Progresso:</span>
-                <div className="flex-1 bg-gray-200 rounded-full h-1.5">
-                  <div
-                    className={`h-1.5 rounded-full transition-all ${
-                      task.progress === 100 ? 'bg-green-500' : 'bg-blue-500'
-                    }`}
-                    style={{ width: `${task.progress}%` }}
-                  />
-                </div>
-                <span className="font-semibold text-gray-900 w-8 text-right">
-                  {task.progress}%
-                </span>
-              </div>
+          {/* Linha 3: Progresso (editável) */}
+          <div className="bg-white/80 rounded px-2 py-2 text-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-gray-500">Progresso:</span>
+              <span className={`font-bold w-8 text-right ${
+                localProgress === 100 ? 'text-green-600' : 'text-blue-600'
+              }`}>
+                {localProgress}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={localProgress}
+              disabled={isSavingProgress}
+              onChange={(e) => handleProgressChange(Number(e.target.value))}
+              onMouseUp={(e) => handleProgressSave(Number((e.target as HTMLInputElement).value))}
+              onTouchEnd={(e) => handleProgressSave(Number((e.target as HTMLInputElement).value))}
+              className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500 disabled:opacity-50"
+              style={{
+                background: `linear-gradient(to right, ${localProgress === 100 ? '#22c55e' : '#3b82f6'} ${localProgress}%, #e5e7eb ${localProgress}%)`
+              }}
+            />
+            <div className="flex justify-between text-[9px] text-gray-400 mt-0.5 px-0.5">
+              <span>0%</span>
+              <span>25%</span>
+              <span>50%</span>
+              <span>75%</span>
+              <span>100%</span>
             </div>
           </div>
 

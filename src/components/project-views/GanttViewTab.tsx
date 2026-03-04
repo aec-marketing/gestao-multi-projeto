@@ -14,7 +14,7 @@
  * - Auditoria de conflitos e ciclos
  */
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Project, Task, Resource } from '@/types/database.types'
 import { Allocation } from '@/types/allocation.types'
@@ -26,11 +26,14 @@ import { GanttTaskRow } from '@/components/gantt/components/GanttTaskRow'
 import { GanttDetailsPanel } from '@/components/gantt/components/GanttDetailsPanel'
 import { GanttBatchSaveBar } from '@/components/gantt/components/GanttBatchSaveBar'
 import { PredecessorLines } from '@/components/gantt/components/PredecessorLines'
+import { PredecessorQuickMenu } from '@/components/gantt/components/PredecessorQuickMenu'
+import { GanttTaskBarWrapper } from '@/components/gantt/components/GanttTaskBarWrapper'
 import AllocationModal from '@/components/AllocationModal'
 import SubtaskManager from '@/components/SubtaskManager'
 import RecalculateModal from '@/components/modals/RecalculateModal'
 import CycleAuditModal from '@/components/modals/CycleAuditModal'
 import { getTaskColor } from '@/components/gantt/utils/ganttColors'
+import { PredecessorDragProvider } from '@/components/gantt/contexts/PredecessorDragContext'
 
 // Hooks customizados
 import { useGanttState } from '@/components/gantt/hooks/useGanttState'
@@ -48,6 +51,8 @@ import { ganttStyles } from '@/components/gantt/utils/ganttColors'
 import { detectCycles } from '@/lib/msproject/validation'
 import { TaskWithAllocations } from '@/components/gantt/types/gantt.types'
 import { formatMinutes, daysToMinutes } from '@/utils/time.utils'
+import { recalculateTasksInCascade } from '@/utils/predecessorCalculations'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface GanttViewTabProps {
   project: Project
@@ -88,6 +93,13 @@ export default function GanttViewTab({
       return () => clearTimeout(timer)
     }
   }, [snapPulse])
+
+  // ========== PREDECESSOR QUICK MENU (ONDA 5.7) ==========
+  const [selectedPredecessor, setSelectedPredecessor] = useState<{
+    pred: any
+    fromTask: any
+    toTask: any
+  } | null>(null)
 
   // ========== CÁLCULOS COM MEMOIZAÇÃO ==========
   const { tasksWithDates, organizedTasks, dateRange } = useGanttCalculations(
@@ -385,7 +397,7 @@ export default function GanttViewTab({
       .eq('id', taskId)
 
     if (error) {
-      alert('Erro ao deletar tarefa')
+      dispatchToast('Erro ao deletar tarefa', 'error')
     } else {
       onRefresh()
     }
@@ -400,7 +412,7 @@ export default function GanttViewTab({
   ) => {
     // Validar: não pode conectar tarefa a si mesma
     if (sourceTaskId === targetTaskId) {
-      alert('⚠️ Uma tarefa não pode depender de si mesma!')
+      dispatchToast('Uma tarefa não pode depender de si mesma', 'info')
       return
     }
 
@@ -412,7 +424,7 @@ export default function GanttViewTab({
       p => p.task_id === targetTaskId && p.predecessor_id === sourceTaskId
     )
     if (existingPred) {
-      alert('⚠️ Esta dependência já existe!')
+      dispatchToast('Esta dependência já existe', 'info')
       return
     }
 
@@ -424,7 +436,7 @@ export default function GanttViewTab({
     }))
 
     if (wouldCreateCycle(targetTaskId, sourceTaskId, existingPredecessors, tasks)) {
-      alert('⚠️ Este predecessor criaria uma dependência circular!')
+      dispatchToast('Este predecessor criaria uma dependência circular', 'info')
       return
     }
 
@@ -440,12 +452,61 @@ export default function GanttViewTab({
 
     if (error) {
       console.error('Erro ao criar predecessor:', error)
-      alert('❌ Erro ao criar predecessor')
-    } else {
-      alert('✅ Predecessor criado com sucesso!')
-      onRefresh()
+      dispatchToast('Erro ao criar predecessor', 'error')
+      return
     }
+
+    // Predecessor criado com sucesso - agora recalcular datas em cascata
+    const newPredecessor = {
+      id: 'temp',
+      task_id: targetTaskId,
+      predecessor_id: sourceTaskId,
+      type: relationType,
+      lag_minutes: 0
+    }
+
+    const updatedPredecessors = [...state.data.predecessors, newPredecessor]
+
+    // Recalcular a partir da tarefa predecessora
+    const updates = recalculateTasksInCascade(
+      sourceTaskId, // A tarefa predecessora que foi vinculada
+      tasks,
+      updatedPredecessors
+    )
+
+    // Se houver atualizações de datas, aplicar no banco
+    if (updates.length > 0) {
+      console.log(`🔄 Recalculando ${updates.length} tarefas após criar predecessor...`)
+
+      for (const update of updates) {
+        const { error: updateError } = await supabase
+          .from('tasks')
+          .update({
+            start_date: update.start_date,
+            end_date: update.end_date
+          })
+          .eq('id', update.id)
+
+        if (updateError) {
+          console.error('Erro ao atualizar tarefa:', updateError)
+        }
+      }
+    }
+
+    dispatchToast('Predecessor criado com sucesso! Datas recalculadas.', 'success')
+    onRefresh()
   }
+
+  // Helper para obter informações de uma tarefa por ID (usado no menu flutuante)
+  const getTaskInfo = useCallback((taskId: string) => {
+    const task = tasks.find(t => t.id === taskId)
+    return task ? { name: task.name } : null
+  }, [tasks])
+
+  // Handler para clique em linha de predecessor (ONDA 5.7)
+  const handlePredecessorClick = useCallback((pred: any, fromTask: any, toTask: any) => {
+    setSelectedPredecessor({ pred, fromTask, toTask })
+  }, [])
 
   const handleApplyRecalculations = async () => {
     // PRIMEIRO: Aplicar mudanças pendentes do resize/drag
@@ -499,7 +560,7 @@ export default function GanttViewTab({
       onRefresh()
     } catch (error) {
       console.error('Erro ao salvar mudanças:', error)
-      alert('Erro ao salvar mudanças')
+      dispatchToast('Erro ao salvar mudanças', 'error')
     } finally {
       setIsSaving(false)
     }
@@ -605,7 +666,7 @@ export default function GanttViewTab({
       actions.setPendingUpdates(uniqueUpdates)
       actions.openModal('showRecalculate')
     } else {
-      alert('Nenhuma tarefa dependente precisa ser recalculada.')
+      dispatchToast('Nenhuma tarefa dependente precisa ser recalculada', 'info')
     }
   }
 
@@ -651,19 +712,9 @@ export default function GanttViewTab({
     // Ordenar alocações por data se fragmentada
     const sortedAllocations = isFragmented
       ? [...allocations].sort((a, b) =>
-          new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+          new Date(a.start_date ?? 0).getTime() - new Date(b.start_date ?? 0).getTime()
         )
       : allocations
-
-    console.log('[FRAGMENT-DEBUG-RENDER] Tarefa:', task.name, {
-      hasSubtasks,
-      allocationsCount: allocations.length,
-      isFragmented,
-      allocations: sortedAllocations.map(a => ({
-        start_date: a.start_date,
-        allocated_minutes: a.allocated_minutes
-      }))
-    })
 
     // Obter pending changes para esta tarefa
     const taskPendingChanges = pendingChanges.getChange(task.id)
@@ -904,18 +955,38 @@ export default function GanttViewTab({
 
               return (
                 <React.Fragment key={allocation.id}>
-                  {/* Barra do fragmento */}
-                  <div
-                    className={`absolute h-8 ${taskColor} rounded cursor-pointer group ${overtimeBorderClass}`}
-                    style={{
-                      ...fragmentStyle,
-                      transition: 'all 0.15s ease-out'
+                  {/* Barra do fragmento com wrapper para predecessores */}
+                  <GanttTaskBarWrapper
+                    taskId={task.id}
+                    taskName={task.name}
+                    editingMode={predecessorEditing.editingMode}
+                    barStyle={{
+                      left: fragmentStyle.left as string,
+                      width: fragmentStyle.width as string,
+                      top: '2px',
+                      height: '32px'
                     }}
-                    onClick={() => actions.selectTask(task.id)}
-                    onMouseEnter={() => setHoveredTask(task)}
-                    onMouseLeave={() => setHoveredTask(null)}
-                    title={`${fragmentLabel} (${index + 1}/${sortedAllocations.length})${hasOvertime ? ' - HORA EXTRA' : ''}`}
+                    getTaskInfo={getTaskInfo}
+                    onConnectionComplete={handleCreatePredecessorFromAnchors}
                   >
+                    <div
+                      className={`h-8 ${taskColor} rounded cursor-pointer group ${overtimeBorderClass}`}
+                      style={{
+                        transition: 'all 0.15s ease-out'
+                      }}
+                      onClick={() => actions.selectTask(task.id)}
+                      onMouseEnter={() => setHoveredTask(task)}
+                      onMouseLeave={() => setHoveredTask(null)}
+                      title={`${fragmentLabel} (${index + 1}/${sortedAllocations.length})${hasOvertime ? ' - HORA EXTRA' : ''}`}
+                    >
+                    {/* Barra de progresso (apenas no primeiro fragmento) */}
+                    {isFirst && (task.progress ?? 0) > 0 && (
+                      <div
+                        className="absolute left-0 top-0 bottom-0 bg-black/20 rounded-l pointer-events-none"
+                        style={{ width: `${Math.min(task.progress ?? 0, 100)}%` }}
+                      />
+                    )}
+
                     {/* Conteúdo adaptativo */}
                     <div className="flex items-center justify-between h-full px-2 pointer-events-none">
                       {fragmentWidth < 40 && (
@@ -943,6 +1014,7 @@ export default function GanttViewTab({
                       )}
                     </div>
                   </div>
+                  </GanttTaskBarWrapper>
 
                   {/* Linha conectora entre fragmentos */}
                   {!isLast && (() => {
@@ -995,30 +1067,50 @@ export default function GanttViewTab({
             )
 
             return (
-              <div
-                className={`absolute h-8 ${taskColorSingle} rounded cursor-pointer group ${
-                  isResizing ? 'ring-2 ring-blue-400 shadow-lg' : ''
-                } ${
-                  hasOvertimeSingle ? overtimeClass : durationClass
-                } ${
-                  isSnapped ? 'animate-pulse' : ''
-                }`}
-              style={{
-                left: `${barPosition.left}px`,
-                width: `${barPosition.width}px`,
-                top: '2px',
-                transition: isResizing ? 'none' : 'all 0.15s ease-out'
-              }}
-              onClick={() => actions.selectTask(task.id)}
-              onMouseEnter={() => setHoveredTask(task)}
-              onMouseLeave={() => setHoveredTask(null)}
-            >
-              {/* Alça esquerda (resize start) */}
-              <div
-                className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize bg-blue-700 opacity-0 group-hover:opacity-100 transition-opacity rounded-l"
-                onMouseDown={(e) => resize.handleResizeStart(task.id, 'start', e)}
-                onClick={(e) => e.stopPropagation()}
-              />
+              <GanttTaskBarWrapper
+                taskId={task.id}
+                taskName={task.name}
+                editingMode={predecessorEditing.editingMode}
+                barStyle={{
+                  left: `${barPosition.left}px`,
+                  width: `${barPosition.width}px`,
+                  top: '2px',
+                  height: '32px'
+                }}
+                getTaskInfo={getTaskInfo}
+                onConnectionComplete={handleCreatePredecessorFromAnchors}
+              >
+                <div
+                  className={`h-8 ${taskColorSingle} rounded cursor-pointer group ${
+                    isResizing ? 'ring-2 ring-blue-400 shadow-lg' : ''
+                  } ${
+                    hasOvertimeSingle ? overtimeClass : durationClass
+                  } ${
+                    isSnapped ? 'animate-pulse' : ''
+                  }`}
+                style={{
+                  transition: isResizing ? 'none' : 'all 0.15s ease-out'
+                }}
+                onClick={() => actions.selectTask(task.id)}
+                onMouseEnter={() => setHoveredTask(task)}
+                onMouseLeave={() => setHoveredTask(null)}
+              >
+              {/* Barra de progresso */}
+              {(task.progress ?? 0) > 0 && (
+                <div
+                  className="absolute left-0 top-0 bottom-0 bg-black/20 rounded-l pointer-events-none"
+                  style={{ width: `${Math.min(task.progress ?? 0, 100)}%` }}
+                />
+              )}
+
+              {/* Alças de resize (apenas quando NÃO estiver editando predecessores) */}
+              {!predecessorEditing.editingMode && (
+                <div
+                  className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize bg-blue-700 opacity-0 group-hover:opacity-100 transition-opacity rounded-l"
+                  onMouseDown={(e) => resize.handleResizeStart(task.id, 'start', e)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              )}
 
               {/* Conteúdo adaptativo baseado no tamanho da barra */}
               <div className="flex items-center justify-between h-full px-2 pointer-events-none">
@@ -1053,19 +1145,22 @@ export default function GanttViewTab({
                        task.work_type === 'wait' ? '⏳' : '⚙️'} {task.name}
                     </span>
                     <span className="text-[9px] text-white bg-white bg-opacity-20 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
-                      {formatMinutes(task.duration_minutes ?? 540, 'short')}
+                      {formatMinutes(task.duration_days * (task.work_type === 'wait' ? 1440 : 540), 'short', task.work_type)}
                     </span>
                   </>
                 )}
               </div>
 
-              {/* Alça direita (resize end) */}
-              <div
-                className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize bg-blue-700 opacity-0 group-hover:opacity-100 transition-opacity rounded-r"
-                onMouseDown={(e) => resize.handleResizeStart(task.id, 'end', e)}
-                onClick={(e) => e.stopPropagation()}
-              />
+              {/* Alça direita (resize end) - apenas quando NÃO estiver editando predecessores */}
+              {!predecessorEditing.editingMode && (
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize bg-blue-700 opacity-0 group-hover:opacity-100 transition-opacity rounded-r"
+                  onMouseDown={(e) => resize.handleResizeStart(task.id, 'end', e)}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              )}
             </div>
+              </GanttTaskBarWrapper>
             )
           })()}
         </div>
@@ -1088,7 +1183,7 @@ export default function GanttViewTab({
 
   // ========== RENDER ==========
   return (
-    <>
+    <PredecessorDragProvider>
       <style>{ganttStyles}</style>
 
       <div className="bg-white rounded-lg border overflow-hidden">
@@ -1257,6 +1352,8 @@ export default function GanttViewTab({
               taskColumnWidth={taskColumnWidth}
               taskPositionMap={taskPositionMap}
               onExpandTask={(taskId) => actions.toggleExpand(taskId)}
+              onPredecessorClick={handlePredecessorClick}
+              editingMode={predecessorEditing.editingMode}
             />
           </div>
         </div>
@@ -1268,6 +1365,7 @@ export default function GanttViewTab({
           task={selectedTaskWithAllocations.task}
           allocations={selectedTaskWithAllocations.allocations}
           onClose={() => actions.selectTask(null)}
+          onUpdate={onRefresh}
         />
       )}
 
@@ -1287,7 +1385,7 @@ export default function GanttViewTab({
               <div>
                 <div className="text-gray-500">Duração</div>
                 <div className="font-medium text-gray-900">
-                  {formatMinutes(hoveredTask.duration_minutes ?? 540, 'long')}
+                  {formatMinutes(hoveredTask.duration_days * (hoveredTask.work_type === 'wait' ? 1440 : 540), 'long', hoveredTask.work_type)}
                 </div>
               </div>
 
@@ -1409,6 +1507,19 @@ export default function GanttViewTab({
         onClose={() => actions.closeModal('showCycleAudit')}
         onRefresh={onRefresh}
       />
-    </>
+
+      {/* Menu rápido de predecessor - ONDA 5.7 */}
+      {selectedPredecessor && (
+        <PredecessorQuickMenu
+          predecessor={selectedPredecessor.pred}
+          fromTask={selectedPredecessor.fromTask}
+          toTask={selectedPredecessor.toTask}
+          onClose={() => setSelectedPredecessor(null)}
+          onUpdate={onRefresh}
+          allTasks={tasks}
+          allPredecessors={state.data.predecessors}
+        />
+      )}
+    </PredecessorDragProvider>
   )
 }

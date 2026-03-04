@@ -8,6 +8,7 @@ import TeamHeatmap from './TeamHeatmap'
 
 interface ProjectsViewProps {
   dateRange: Date[]
+  currentMonth: Date
   eventsByResource: Map<string, CalendarEvent[]>
   personalEventsByResource: Map<string, PersonalEvent[]>
   totalResources: number
@@ -23,6 +24,7 @@ type ViewMode = 'cards' | 'heatmap'
  */
 export default function ProjectsView({
   dateRange,
+  currentMonth,
   eventsByResource,
   personalEventsByResource,
   totalResources,
@@ -179,10 +181,11 @@ export default function ProjectsView({
       </div>
 
       {/* Main content */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className={`flex-1 overflow-auto ${viewMode === 'heatmap' ? '' : 'p-4'}`}>
         {viewMode === 'heatmap' ? (
           <TeamHeatmap
             dateRange={dateRange}
+            currentMonth={currentMonth}
             eventsByResource={eventsByResource}
             personalEventsByResource={personalEventsByResource}
             totalResources={totalResources}

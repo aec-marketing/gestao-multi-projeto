@@ -13,6 +13,7 @@ import { getColumnWidth } from '../utils/ganttCalculations'
 import { validateTaskStartDate, recalculateTasksInCascade } from '@/utils/predecessorCalculations'
 import { parseLocalDate } from '@/utils/date.utils'
 import { GanttPendingChange } from './useGanttPendingChanges'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 export function useGanttResize(
   tasks: Task[],
@@ -221,7 +222,7 @@ export function useGanttResize(
             // Validação de predecessor
             const validation = validateTaskStartDate(task, newStartDate, tasks, predecessors)
             if (!validation.isValid) {
-              alert(`❌ Não é possível mover a tarefa para esta data!\n\n${validation.message}`)
+              dispatchToast(`Não é possível mover a tarefa: ${validation.message}`, 'info')
               return
             }
 
@@ -246,7 +247,7 @@ export function useGanttResize(
       // Mudanças ficam pendentes até usuário salvar
     } catch (error) {
       console.error('Error updating task duration:', error)
-      alert('Erro ao atualizar duração da tarefa')
+      dispatchToast('Erro ao atualizar duração da tarefa', 'error')
     }
   }
 

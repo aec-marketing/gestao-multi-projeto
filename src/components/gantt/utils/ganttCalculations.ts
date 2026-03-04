@@ -60,12 +60,17 @@ export function calculateTaskDates(
 
       // 2. Calcular data de fim baseada em duration_minutes
       const durationMinutes = task.duration_minutes ?? MINUTES_PER_WORKING_DAY
+      // 'wait' tasks usam 1440 min/dia (dias corridos), 'work' usa 540 min/dia (dias úteis)
+      const minutesPerDay = task.work_type === 'wait' ? 1440 : MINUTES_PER_WORKING_DAY
 
-      if (task.end_date) {
+      // Para tarefas 'wait': sempre recalcular end_date a partir de duration_minutes,
+      // pois end_date no banco pode ter sido salva com o divisor errado (540 em vez de 1440).
+      // Para tarefas 'work': usar end_date do banco se disponível.
+      if (task.end_date && task.work_type !== 'wait') {
         const parsed = parseLocalDate(task.end_date)
         taskEndDate = parsed || new Date(taskStartDate)
       } else {
-        const durationDays = minutesToDays(durationMinutes)
+        const durationDays = durationMinutes / minutesPerDay
         taskEndDate = new Date(taskStartDate)
         taskEndDate.setDate(taskEndDate.getDate() + Math.ceil(durationDays) - 1)
       }
@@ -94,7 +99,9 @@ export function calculateTaskDates(
     } else {
       // Tarefa sem filhos: usar duration_minutes para precisão (permite < 1 dia)
       const durationMinutes = task.duration_minutes ?? MINUTES_PER_WORKING_DAY
-      durationDays = minutesToDays(durationMinutes)
+      // 'wait' tasks usam dias corridos (1440 min/dia), não dias úteis (540 min/dia)
+      const minutesPerDay = task.work_type === 'wait' ? 1440 : MINUTES_PER_WORKING_DAY
+      durationDays = durationMinutes / minutesPerDay
     }
 
     return {

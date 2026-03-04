@@ -5,6 +5,7 @@ import { Project, Task, Resource } from '@/types/database.types'
 import { Allocation } from '@/types/allocation.types'
 import { calculateResourceCost } from '@/utils/cost.utils'
 import { supabase } from '@/lib/supabase'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface FinancialViewTabProps {
   project: Project
@@ -22,7 +23,7 @@ export default function FinancialViewTab({
   onRefresh
 }: FinancialViewTabProps) {
   // ONDA 5.7: Estados para campos editáveis do projeto
-  const [saleValue, setSaleValue] = useState<string>((project as any).sale_value?.toString() || '')
+  const [saleValue, setSaleValue] = useState<string>(project.sale_value?.toString() || '')
   const [isEditingSaleValue, setIsEditingSaleValue] = useState(false)
   const [isSavingSaleValue, setIsSavingSaleValue] = useState(false)
 
@@ -45,17 +46,17 @@ export default function FinancialViewTab({
 
       const { error } = await supabase
         .from('projects')
-        .update({ sale_value: valueToSave } as any)
+        .update({ sale_value: valueToSave })
         .eq('id', project.id)
 
       if (error) throw error
 
-      alert('✅ Valor de venda salvo com sucesso!')
+      dispatchToast('Valor de venda salvo com sucesso!', 'success')
       setIsEditingSaleValue(false)
       onRefresh()
     } catch (error) {
       console.error('Erro ao salvar valor de venda:', error)
-      alert('❌ Erro ao salvar valor de venda')
+      dispatchToast('Erro ao salvar valor de venda', 'error')
     } finally {
       setIsSavingSaleValue(false)
     }
@@ -250,7 +251,7 @@ export default function FinancialViewTab({
                   <button
                     onClick={() => {
                       setIsEditingSaleValue(false)
-                      setSaleValue((project as any).sale_value?.toString() || '')
+                      setSaleValue(project.sale_value?.toString() || '')
                     }}
                     disabled={isSavingSaleValue}
                     className="flex-1 px-3 py-1.5 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50 text-xs font-medium"

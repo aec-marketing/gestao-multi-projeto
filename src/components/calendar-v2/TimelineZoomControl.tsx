@@ -1,6 +1,6 @@
 'use client'
 
-export type TimelineZoom = 'day' | 'week' | 'month'
+export type TimelineZoom = 'day' | 'week' | 'month' | 'year'
 
 interface TimelineZoomControlProps {
   zoom: TimelineZoom
@@ -16,6 +16,7 @@ export default function TimelineZoomControl({ zoom, onZoomChange }: TimelineZoom
     { value: 'day', label: 'Dia', icon: '📅' },
     { value: 'week', label: 'Semana', icon: '📆' },
     { value: 'month', label: 'Mês', icon: '🗓️' },
+    { value: 'year', label: 'Ano', icon: '📊' },
   ]
 
   return (

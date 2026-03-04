@@ -12,6 +12,7 @@ interface TaskAnchorProps {
   position: 'left' | 'right'  // Posição física no visual
   isActive: boolean  // Se está em modo de edição
   isDragging: boolean  // Se está sendo arrastado
+  isSnapped?: boolean  // Se é o alvo atual do snap (destaque especial)
   onMouseDown: (taskId: string, anchor: AnchorType, event: React.MouseEvent) => void
   onMouseUp: (taskId: string, anchor: AnchorType) => void
   onMouseEnter: () => void
@@ -33,6 +34,7 @@ export function TaskAnchor({
   position,
   isActive,
   isDragging,
+  isSnapped = false,
   onMouseDown,
   onMouseUp,
   onMouseEnter,
@@ -44,8 +46,10 @@ export function TaskAnchor({
   const isStart = type === 'start'
   const anchorLabel = isStart ? 'Início' : 'Fim'
 
-  // Cores baseadas no tipo
-  const colorClasses = isStart
+  // Cores baseadas no tipo e estado de snap
+  const colorClasses = isSnapped
+    ? 'bg-yellow-400 border-yellow-600 ring-4 ring-yellow-300 animate-pulse'
+    : isStart
     ? 'bg-green-500 border-green-700 hover:bg-green-600'
     : 'bg-blue-500 border-blue-700 hover:bg-blue-600'
 
@@ -58,8 +62,9 @@ export function TaskAnchor({
         absolute top-1/2 -translate-y-1/2 ${positionClasses}
         w-3 h-3 rounded-full border-2
         ${colorClasses}
-        ${isDragging ? 'scale-150 shadow-lg z-50' : 'scale-100 hover:scale-125'}
+        ${isDragging ? 'scale-150 shadow-lg z-[70]' : 'scale-100 hover:scale-125 z-[65]'}
         transition-all duration-150 cursor-pointer
+        pointer-events-auto
         group
       `}
       onMouseDown={(e) => {
@@ -68,6 +73,7 @@ export function TaskAnchor({
       }}
       onMouseUp={(e) => {
         e.stopPropagation()
+        e.preventDefault()
         onMouseUp(taskId, type)
       }}
       onMouseEnter={onMouseEnter}

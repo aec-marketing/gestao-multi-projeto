@@ -73,6 +73,8 @@ interface PredecessorLinesProps {
   taskColumnWidth: number
   taskPositionMap?: Map<string, number> // Mapa opcional de posições Y (taskId -> yPosition)
   onExpandTask?: (taskId: string) => void
+  onPredecessorClick?: (predecessor: Predecessor, fromTask: TaskWithDates, toTask: TaskWithDates) => void  // ONDA 5.7: Click para abrir menu de edição
+  editingMode?: boolean  // ONDA 5.7: Se true, linhas são clicáveis
 }
 
 export function PredecessorLines({
@@ -84,7 +86,9 @@ export function PredecessorLines({
   rowHeight,
   taskColumnWidth,
   taskPositionMap: externalPositionMap,
-  onExpandTask
+  onExpandTask,
+  onPredecessorClick,
+  editingMode = false
 }: PredecessorLinesProps) {
   const [hoveredLine, setHoveredLine] = React.useState<string | null>(null)
 
@@ -336,11 +340,12 @@ export function PredecessorLines({
 
   return (
     <svg
-      className="absolute top-0 left-0 pointer-events-none"
+      className="absolute top-0 left-0"
       style={{
         width: '100%',
         height: '100%',
-        zIndex: 15
+        zIndex: 30,  // ONDA 5.7: Aumentado para ficar acima das barras (z-index 20-29)
+        pointerEvents: 'none'  // SVG não clicável, mas paths individuais serão
       }}
     >
       <defs>
@@ -403,9 +408,9 @@ export function PredecessorLines({
         const fromY = getTaskY(line.fromTask.id)
         const toY = getTaskY(line.toTask.id)
         const fromStartX = getDateX(line.fromTask.start_date, line.fromTask)
-        const fromEndX = fromStartX + (getTaskDuration(line.fromTask) * columnWidth)
+        const fromEndX = getDateX(getEffectiveEndDate(line.fromTask), line.fromTask)
         const toStartX = getDateX(line.toTask.start_date, line.toTask)
-        const toEndX = toStartX + (getTaskDuration(line.toTask) * columnWidth)
+        const toEndX = getDateX(getEffectiveEndDate(line.toTask), line.toTask)
 
         return (
           <g key={line.pred.id}>
@@ -435,6 +440,16 @@ export function PredecessorLines({
               </>
             )}
 
+            {/* Sombra da linha (outline branco para contraste) - ONDA 5.7 */}
+            <path
+              d={line.path}
+              stroke="white"
+              strokeWidth={line.hasConflict ? "5" : (isHovered ? "5" : "4")}
+              fill="none"
+              className="transition-all duration-200 pointer-events-none"
+              style={{ opacity: 0.9 }}
+            />
+
             {/* Linha principal */}
             <path
               d={line.path}
@@ -443,7 +458,7 @@ export function PredecessorLines({
               strokeDasharray={line.hasConflict ? "5,5" : "none"}
               fill="none"
               markerEnd={`url(#arrow-${markerColor})`}
-              className="transition-all duration-200"
+              className="transition-all duration-200 pointer-events-none"
               style={{ opacity: isHovered ? 1 : (line.hasConflict ? 0.9 : 0.8) }}
             />
 
@@ -453,19 +468,27 @@ export function PredecessorLines({
               stroke="transparent"
               strokeWidth="12"
               fill="none"
-              className="pointer-events-auto cursor-pointer"
-              onMouseEnter={() => setHoveredLine(line.pred.id)}
-              onMouseLeave={() => setHoveredLine(null)}
+              className={editingMode ? "pointer-events-auto cursor-pointer hover:stroke-gray-200" : "pointer-events-none"}
+              onMouseEnter={editingMode ? () => setHoveredLine(line.pred.id) : undefined}
+              onMouseLeave={editingMode ? () => setHoveredLine(null) : undefined}
+              onClick={editingMode ? (e) => {
+                e.stopPropagation()
+                onPredecessorClick?.(line.pred, line.fromTask, line.toTask)
+              } : undefined}
             >
-              <title>{`${line.fromTask.name} → ${line.toTask.name}`}</title>
+              {editingMode && <title>{`Clique para editar: ${line.fromTask.name} → ${line.toTask.name}`}</title>}
             </path>
 
-            {/* Badge no meio da linha */}
+            {/* Badge no meio da linha — posicionado no segmento vertical da escada */}
             <g
               transform={`translate(${(fromEndX + toStartX) / 2}, ${(fromY + toY) / 2})`}
-              className="pointer-events-auto cursor-pointer"
-              onMouseEnter={() => setHoveredLine(line.pred.id)}
-              onMouseLeave={() => setHoveredLine(null)}
+              className={editingMode ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}
+              onMouseEnter={editingMode ? () => setHoveredLine(line.pred.id) : undefined}
+              onMouseLeave={editingMode ? () => setHoveredLine(null) : undefined}
+              onClick={editingMode ? (e) => {
+                e.stopPropagation()
+                onPredecessorClick?.(line.pred, line.fromTask, line.toTask)
+              } : undefined}
             >
               <rect
                 x="-15"

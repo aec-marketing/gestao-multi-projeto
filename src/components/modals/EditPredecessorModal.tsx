@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { Task } from '@/types/database.types'
 import { recalculateTasksInCascade } from '@/utils/predecessorCalculations'
 import { wouldCreateCycle } from '@/lib/msproject/validation'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface EditPredecessorModalProps {
   isOpen: boolean
@@ -78,7 +79,7 @@ export default function EditPredecessorModal({
     setIsSubmitting(false)
 
     if (error) {
-      alert('Erro ao salvar alterações')
+      dispatchToast('Erro ao salvar alterações', 'error')
       return
     }
 

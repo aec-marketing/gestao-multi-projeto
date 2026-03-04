@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import { Resource, CalendarEvent } from '@/types/allocation.types'
 import { PersonalEvent, EVENT_TYPE_CONFIG } from '@/types/personal-events.types'
+import { TimelineZoom } from './TimelineZoomControl'
 import DayCell from './DayCell'
 import TimelineTaskBar from './TimelineTaskBar'
 import { mergeConsecutiveProjectBars, calculateTaskBarStyle } from '@/utils/calendar/taskbar.utils'
@@ -13,6 +14,7 @@ import { PROJECT_COLORS } from './TimelineTaskBar'
 interface TimelineResourceRowProps {
   resource: { id: string; name: string; hierarchy: string; role: string | null }
   dateRange: Date[]
+  zoom?: TimelineZoom
   events: CalendarEvent[]
   personalEvents: PersonalEvent[]
   projectColorMap: Record<string, typeof PROJECT_COLORS[0]>
@@ -34,6 +36,7 @@ interface PersonalEventBar {
 export default function TimelineResourceRow({
   resource,
   dateRange,
+  zoom = 'month',
   events,
   personalEvents,
   projectColorMap,
@@ -151,6 +154,58 @@ export default function TimelineResourceRow({
     return `${icon} Sem função`
   }
 
+  // Modo anual: contar tarefas por mês e mostrar barra de calor
+  if (zoom === 'year') {
+    const today = new Date()
+    return (
+      <div className="flex border-b hover:bg-gray-50 transition-colors">
+        <div className="sticky left-0 z-30 bg-white border-r w-[240px] p-3 flex-shrink-0">
+          <div className="font-semibold text-sm text-gray-900 truncate">{resource.name}</div>
+          <div className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium ${getHierarchyBadgeColor(resource.hierarchy)}`}>
+            {getDisplayLabel(resource.hierarchy, resource.role)}
+          </div>
+        </div>
+        <div className="flex-1 flex">
+          {dateRange.map((month, index) => {
+            const monthEvents = events.filter(e => {
+              const start = new Date(e.startDate)
+              return start.getFullYear() === month.getFullYear() && start.getMonth() === month.getMonth()
+            })
+            const count = monthEvents.length
+            const isCurrentMonth =
+              month.getFullYear() === today.getFullYear() &&
+              month.getMonth() === today.getMonth()
+
+            // Calor por quantidade de tarefas
+            let heatBg = ''
+            if (count === 0) heatBg = ''
+            else if (count <= 2) heatBg = 'bg-blue-50'
+            else if (count <= 5) heatBg = 'bg-blue-100'
+            else if (count <= 9) heatBg = 'bg-blue-200'
+            else heatBg = 'bg-blue-300'
+
+            return (
+              <div
+                key={index}
+                className={`flex-1 border-r flex items-center justify-center min-h-[56px] cursor-pointer transition-colors
+                  ${heatBg}
+                  ${isCurrentMonth ? 'ring-2 ring-inset ring-blue-400' : ''}
+                  hover:brightness-95`}
+                style={{ minWidth: '60px' }}
+                title={`${count} tarefa(s)`}
+                onClick={() => onDayClick(month, resource.id)}
+              >
+                {count > 0 && (
+                  <span className="text-xs font-semibold text-blue-700">{count}</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex border-b hover:bg-gray-50 transition-colors">
       {/* Fixed left column - Resource info */}
@@ -175,7 +230,7 @@ export default function TimelineResourceRow({
             <div
               key={dayIndex}
               className="flex-1 relative"
-              style={{ minWidth: '50px' }}
+              style={{ minWidth: zoom === 'week' ? '120px' : zoom === 'day' ? '200px' : '50px' }}
             >
               <DayCell
                 date={day}

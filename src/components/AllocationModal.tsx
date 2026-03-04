@@ -8,6 +8,7 @@ import { formatDateBR } from '@/utils/date.utils'
 import { formatMinutes } from '@/utils/time.utils'
 import { calculateResourceCost, formatCurrency } from '@/utils/cost.utils'
 import { showErrorAlert, showSuccessAlert, logError, ErrorContext } from '@/utils/errorHandler'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 import { useActiveResources, useAllocations } from '@/hooks/useResources'
 import { useResourceContext } from '@/contexts/ResourceContext'
 import { checkResourceAvailability, ResourceConflict } from '@/lib/resource-service'
@@ -106,7 +107,7 @@ export default function AllocationModal({
         if (allocation.overtime_minutes && allocation.overtime_minutes > 0) {
           setHasOvertime(true)
           setOvertimeMinutes(allocation.overtime_minutes)
-          setOvertimeMultiplier((allocation as any).overtime_multiplier || 1.5)
+          setOvertimeMultiplier(allocation.overtime_multiplier || 1.5)
         } else {
           setHasOvertime(false)
           setOvertimeMinutes(0)
@@ -120,11 +121,8 @@ export default function AllocationModal({
    * 🌊 ONDA 5.2: Abrir Planner em modo de edição
    */
   function openPlannerForEdit(resourceId: string) {
-    console.log('[PLANNER-DEBUG] Abrindo Planner para edição - recurso:', resourceId)
-
     const selectedResource = allResources.find(r => r.id === resourceId)
     if (!selectedResource) {
-      console.log('[PLANNER-DEBUG] Recurso não encontrado:', resourceId)
       return
     }
 
@@ -137,10 +135,8 @@ export default function AllocationModal({
         end_date: a.end_date,
         allocated_minutes: a.allocated_minutes ?? 0,
         overtime_minutes: a.overtime_minutes || 0,
-        overtime_multiplier: (a as any).overtime_multiplier || 1.0
+        overtime_multiplier: a.overtime_multiplier || 1.0
       }))
-
-    console.log('[PLANNER-DEBUG] Fragmentos encontrados:', resourceFragments)
 
     setSelectedResourceForModal(selectedResource)
     setExistingFragmentsForEdit(resourceFragments)
@@ -158,41 +154,18 @@ export default function AllocationModal({
   // ONDA 3: Detecção automática de overflow quando recurso é selecionado
   useEffect(() => {
     const detectOverflow = async () => {
-      console.log('[OVERFLOW-DEBUG] useEffect disparado', {
-        allocationId,
-        selectedResourceId,
-        taskStartDate: task.start_date,
-        taskName: task.name
-      })
-
       // Só detectar para novas alocações (não em modo de edição)
       if (!selectedResourceId || !task.start_date) {
-        console.log('[OVERFLOW-DEBUG] Saindo cedo:', {
-          motivo: !selectedResourceId ? 'sem recurso' : 'sem data'
-        })
         return
       }
 
       const selectedResource = allResources.find(r => r.id === selectedResourceId)
       if (!selectedResource) {
-        console.log('[OVERFLOW-DEBUG] Recurso não encontrado:', selectedResourceId)
         return
       }
 
-      console.log('[OVERFLOW-DEBUG] Recurso selecionado:', {
-        nome: selectedResource.name,
-        capacidadeDiaria: selectedResource.daily_capacity_minutes
-      })
-
       // Minutos que queremos alocar
       const minutesToAllocate = allocationType === 'partial' ? allocatedMinutes : task.duration_minutes || 0
-
-      console.log('[OVERFLOW-DEBUG] Minutos a alocar:', {
-        allocationType,
-        minutesToAllocate,
-        taskDurationMinutes: task.duration_minutes,
-        allocatedMinutes
-      })
 
       // Buscar alocações existentes do recurso no mesmo dia (start_date)
       const existingAllocationsOnDate = allAllocations.filter(a =>
@@ -201,14 +174,6 @@ export default function AllocationModal({
         a.task_id !== task.id
       )
 
-      console.log('[OVERFLOW-DEBUG] Alocações existentes no dia:', {
-        quantidade: existingAllocationsOnDate.length,
-        alocacoes: existingAllocationsOnDate.map(a => ({
-          allocated_minutes: a.allocated_minutes,
-          task_id: a.task_id
-        }))
-      })
-
       // Calcular total de minutos já alocados neste dia
       // IMPORTANTE: Se allocated_minutes é NULL, buscar duration_minutes da tarefa
       let existingMinutesOnDate = 0
@@ -216,11 +181,9 @@ export default function AllocationModal({
       for (const alloc of existingAllocationsOnDate) {
         if (alloc.allocated_minutes !== null && alloc.allocated_minutes !== undefined) {
           // Tem valor explícito
-          console.log('[OVERFLOW-DEBUG] Somando minutos (explícito):', { alloc_id: alloc.id, minutes: alloc.allocated_minutes })
           existingMinutesOnDate += alloc.allocated_minutes
         } else {
           // NULL = 100% da tarefa, buscar duration_minutes
-          console.log('[OVERFLOW-DEBUG] allocated_minutes é NULL, buscando task...')
           const { data: taskData, error } = await supabase
             .from('tasks')
             .select('duration_minutes')
@@ -228,21 +191,13 @@ export default function AllocationModal({
             .single()
 
           if (error) {
-            console.error('[OVERFLOW-DEBUG] Erro ao buscar task:', error)
             continue
           }
 
           const minutes = taskData?.duration_minutes || 0
-          console.log('[OVERFLOW-DEBUG] Somando minutos (100% da task):', {
-            alloc_id: alloc.id,
-            task_id: alloc.task_id,
-            duration_minutes: minutes
-          })
           existingMinutesOnDate += minutes
         }
       }
-
-      console.log('[OVERFLOW-DEBUG] Total de minutos já alocados:', existingMinutesOnDate)
 
       // ONDA 3.5: Calcular plano multi-dia RECURSIVO
       // Criar mapa de alocações existentes por data
@@ -269,8 +224,6 @@ export default function AllocationModal({
         }
       }
 
-      console.log('[MULTI-DAY-DEBUG] Alocações existentes por data:', existingAllocationsByDate)
-
       // Calcular plano multi-dia
       const plan = calculateMultiDayAllocationPlan(
         minutesToAllocate,
@@ -280,13 +233,9 @@ export default function AllocationModal({
         false // Não usar hora extra automaticamente - perguntar ao usuário
       )
 
-      console.log('[MULTI-DAY-DEBUG] Plano calculado:', plan)
-
       // 🌊 ONDA 5: Abrir Planner para TODOS os casos multi-dia
       // (Substitui os modais de Weekend e MultiDay)
       if (plan.days.length > 1 || plan.requiresWeekendDecision || plan.requiresUserDecision) {
-        console.log('[PLANNER-DEBUG] 🎯 Abrindo Planner para planejamento visual')
-
         // Guardar informações da alocação pendente
         setPendingAllocation({
           resourceId: selectedResourceId,
@@ -299,7 +248,6 @@ export default function AllocationModal({
         setMultiDayPlan(plan)
         setShowPlanner(true)
 
-        console.log('[PLANNER-DEBUG] Planner aberto!')
         return
       }
 
@@ -307,8 +255,6 @@ export default function AllocationModal({
       /*
       // 🌊 ONDA 4.3: PRIORIDADE CRONOLÓGICA - Verificar fins de semana PRIMEIRO
       if (plan.requiresWeekendDecision && plan.weekendsDetected > 0) {
-        console.log('[WEEKEND-DEBUG] 🏖️ Fins de semana detectados - abrindo modal de fim de semana PRIMEIRO')
-
         // Guardar informações da alocação pendente
         setPendingAllocation({
           resourceId: selectedResourceId,
@@ -353,14 +299,11 @@ export default function AllocationModal({
         setWeekendDays(weekends)
         setShowWeekendModal(true)
 
-        console.log('[WEEKEND-DEBUG] Estado do modal de fim de semana atualizado!', weekends)
         return // Parar aqui - modal de overflow só abre depois
       }
 
       // Se o plano requer decisão do usuário (tem dias com overflow), abrir modal multi-dia
       if (plan.requiresUserDecision) {
-        console.log('[MULTI-DAY-DEBUG] ⚠️ OVERFLOW MULTI-DIA DETECTADO! Abrindo modal...')
-
         // Guardar informações da alocação pendente
         setPendingAllocation({
           resourceId: selectedResourceId,
@@ -372,10 +315,6 @@ export default function AllocationModal({
         setSelectedResourceForModal(selectedResource)
         setMultiDayPlan(plan)
         setShowMultiDayModal(true)
-
-        console.log('[MULTI-DAY-DEBUG] Estado do modal multi-dia atualizado!')
-      } else {
-        console.log('[MULTI-DAY-DEBUG] ✅ Sem overflow ou overflow resolvido automaticamente')
       }
       */
     }
@@ -385,13 +324,13 @@ export default function AllocationModal({
 
   async function handleAllocate() {
     if (!selectedResourceId) {
-      alert('Selecione uma pessoa')
+      dispatchToast('Selecione uma pessoa', 'info')
       return
     }
 
     // Check for task dates
     if (!task.start_date || !task.end_date) {
-      alert('Esta tarefa não possui datas definidas')
+      dispatchToast('Esta tarefa não possui datas definidas', 'info')
       return
     }
 
@@ -479,7 +418,7 @@ export default function AllocationModal({
       onSuccess()
     } catch (error: any) {
       if (error.code === '23505') {
-        alert('Esta pessoa já está alocada nesta tarefa')
+        dispatchToast('Esta pessoa já está alocada nesta tarefa', 'info')
       } else {
         logError(error, 'handleAllocate')
         showErrorAlert(error, ErrorContext.ALLOCATION_CREATE)
@@ -528,7 +467,7 @@ export default function AllocationModal({
       onSuccess()
     } catch (error: any) {
       if (error.code === '23505') {
-        alert('Esta pessoa já está alocada nesta tarefa')
+        dispatchToast('Esta pessoa já está alocada nesta tarefa', 'info')
       } else {
         logError(error, 'handleForceAllocate')
         showErrorAlert(error, ErrorContext.ALLOCATION_CREATE)
@@ -544,7 +483,6 @@ export default function AllocationModal({
   async function handleOvertimeDecision(option: OvertimeOption) {
     if (!pendingAllocation) return
     if (!overflowResult) {
-      console.error('[OVERFLOW-DEBUG] overflowResult não encontrado!')
       return
     }
 
@@ -566,30 +504,16 @@ export default function AllocationModal({
       }
 
       // Aplicar a opção escolhida
-      console.log('[OVERFLOW-DEBUG] Aplicando opção:', option.type)
-
       switch (option.type) {
         case 'push_date':
           // Empurrar para próximo dia (sem hora extra)
           // IMPORTANTE: Criar 2 alocações - uma no dia atual (capacidade disponível) + uma no próximo dia (resto)
-          console.log('[OVERFLOW-DEBUG] Push date:', {
-            oldDate: task.end_date,
-            newDate: option.newEndDate,
-            minutesAvailable: overflowResult?.minutesAvailable,
-            minutesOverflow: overflowResult?.minutesOverflow
-          })
-
           if (!overflowResult) {
             throw new Error('overflowResult não encontrado para push_date')
           }
 
           // Se há capacidade disponível no dia atual, criar alocação para usar essa capacidade
           if (overflowResult.minutesAvailable > 0) {
-            console.log('[OVERFLOW-DEBUG] Criando alocação 1/2 (dia atual):', {
-              date: task.start_date,
-              minutes: overflowResult.minutesAvailable
-            })
-
             const { error: firstAllocError } = await supabase
               .from('allocations')
               .insert({
@@ -604,35 +528,24 @@ export default function AllocationModal({
               })
 
             if (firstAllocError) {
-              console.error('[OVERFLOW-DEBUG] Erro ao criar primeira alocação:', firstAllocError)
               throw firstAllocError
             }
-
-            console.log('[OVERFLOW-DEBUG] Primeira alocação criada com sucesso!')
           }
 
           // Segunda alocação: resto no próximo dia
-          console.log('[OVERFLOW-DEBUG] Criando alocação 2/2 (próximo dia):', {
-            date: option.newEndDate,
-            minutes: overflowResult.minutesOverflow
-          })
-
           allocationData.start_date = option.newEndDate
           allocationData.end_date = option.newEndDate
           allocationData.allocated_minutes = overflowResult.minutesOverflow
 
           // IMPORTANTE: Atualizar a data de fim da tarefa também!
-          console.log('[OVERFLOW-DEBUG] Atualizando data de fim da tarefa...')
           const { error: taskUpdateError } = await supabase
             .from('tasks')
             .update({ end_date: option.newEndDate })
             .eq('id', task.id)
 
           if (taskUpdateError) {
-            console.error('[OVERFLOW-DEBUG] Erro ao atualizar tarefa:', taskUpdateError)
             throw taskUpdateError
           }
-          console.log('[OVERFLOW-DEBUG] Tarefa atualizada com sucesso!')
           break
 
         case 'overtime_weekday':
@@ -642,13 +555,6 @@ export default function AllocationModal({
           const overtimeToday = Math.min(totalOverflow, MAX_OVERTIME_WEEKDAY_MINUTES)
           const exceededOvertime = totalOverflow - overtimeToday
 
-          console.log('[OVERFLOW-DEBUG] Overtime weekday com limite CLT:', {
-            totalOverflow,
-            overtimeToday,
-            exceededOvertime,
-            multiplier: option.multiplier
-          })
-
           // Primeira alocação: capacidade disponível hoje + hora extra (max 2h)
           allocationData.allocated_minutes = overflowResult.minutesAvailable
           allocationData.overtime_minutes = overtimeToday
@@ -656,8 +562,6 @@ export default function AllocationModal({
 
           // Se há excedente além das 2h, criar segunda alocação no próximo dia
           if (exceededOvertime > 0) {
-            console.log('[OVERFLOW-DEBUG] Excedente de', exceededOvertime, 'minutos será alocado no próximo dia')
-
             // Calcular próximo dia útil
             const nextDay = new Date(task.start_date + 'T00:00:00')
             nextDay.setDate(nextDay.getDate() + 1)
@@ -681,16 +585,10 @@ export default function AllocationModal({
             }
           }
 
-          console.log('[OVERFLOW-DEBUG] Alocação configurada:', allocationData)
           break
 
         case 'overtime_weekend':
           // Trabalhar no fim de semana (2.0×)
-          console.log('[OVERFLOW-DEBUG] Overtime weekend:', {
-            overtimeMinutes: option.overtimeMinutes,
-            multiplier: option.multiplier,
-            newDate: option.newEndDate
-          })
           allocationData.overtime_minutes = option.overtimeMinutes
           allocationData.overtime_multiplier = option.multiplier
 
@@ -699,22 +597,17 @@ export default function AllocationModal({
             allocationData.end_date = option.newEndDate
 
             // IMPORTANTE: Atualizar a data de fim da tarefa para o fim de semana
-            console.log('[OVERFLOW-DEBUG] Atualizando data de fim da tarefa para fim de semana...')
             const { error: taskUpdateError2 } = await supabase
               .from('tasks')
               .update({ end_date: option.newEndDate })
               .eq('id', task.id)
 
             if (taskUpdateError2) {
-              console.error('[OVERFLOW-DEBUG] Erro ao atualizar tarefa:', taskUpdateError2)
               throw taskUpdateError2
             }
-            console.log('[OVERFLOW-DEBUG] Tarefa atualizada para fim de semana:', option.newEndDate)
           }
           break
       }
-
-      console.log('[OVERFLOW-DEBUG] Dados da alocação:', allocationData)
 
       // Verificar se há segunda alocação pendente (limite CLT)
       const secondAllocationData = allocationData._createSecondAllocation
@@ -730,12 +623,8 @@ export default function AllocationModal({
 
         if (error) throw error
 
-        console.log('[OVERFLOW-DEBUG] Alocação criada com sucesso!')
-
         // Se há segunda alocação (excedente CLT), criar agora
         if (secondAllocationData) {
-          console.log('[OVERFLOW-DEBUG] Criando segunda alocação (excedente CLT):', secondAllocationData)
-
           const { error: secondError } = await supabase
             .from('allocations')
             .insert({
@@ -750,8 +639,6 @@ export default function AllocationModal({
             })
 
           if (secondError) throw secondError
-
-          console.log('[OVERFLOW-DEBUG] Segunda alocação (excedente) criada com sucesso!')
         }
       } else {
         // Para push_date, inserir apenas a segunda alocação (primeira já foi criada no switch)
@@ -760,8 +647,6 @@ export default function AllocationModal({
           .insert(allocationData)
 
         if (error) throw error
-
-        console.log('[OVERFLOW-DEBUG] Segunda alocação criada com sucesso!')
       }
 
       // Atualizar custo real da tarefa
@@ -788,7 +673,7 @@ export default function AllocationModal({
       onSuccess()
     } catch (error: any) {
       if (error.code === '23505') {
-        alert('Esta pessoa já está alocada nesta tarefa')
+        dispatchToast('Esta pessoa já está alocada nesta tarefa', 'info')
       } else {
         logError(error, 'handleOvertimeDecision')
         showErrorAlert(error, ErrorContext.ALLOCATION_CREATE)
@@ -814,10 +699,7 @@ export default function AllocationModal({
    * ONDA 3.5: Processar decisões do modal multi-dia
    */
   async function handleMultiDayDecisions(decisions: DayDecision[]) {
-    console.log('[MULTI-DAY-DEBUG] Decisões recebidas:', decisions)
-
     if (!pendingAllocation || !multiDayPlan || !selectedResourceForModal) {
-      console.error('[MULTI-DAY-DEBUG] Dados pendentes não encontrados!')
       return
     }
 
@@ -831,16 +713,10 @@ export default function AllocationModal({
       const overflowDecisionsMap = new Map(decisions.map(d => [d.date, d]))
       const weekendDecisionsMap = new Map(weekendDecisions.map(d => [d.date, d]))
 
-      console.log('[MULTI-DAY-DEBUG] 🌊 ONDA 4.4: Decisões de fim de semana:', Array.from(weekendDecisionsMap.entries()))
-
       // Para cada dia do plano, criar alocação
       const allocationsToCreate: any[] = []
       let remainingMinutes = pendingAllocation.allocatedMinutes
       const dailyCapacity = selectedResourceForModal.daily_capacity_minutes || 540
-
-      console.log('[MULTI-DAY-DEBUG] Criando alocações para', remainingMinutes, 'minutos totais')
-      console.log('[MULTI-DAY-DEBUG] Plano tem', multiDayPlan.days.length, 'dias')
-      console.log('[MULTI-DAY-DEBUG] Decisões de overflow:', Array.from(overflowDecisionsMap.entries()))
 
       // 🌊 ONDA 4.4: Processar CRONOLOGICAMENTE - incluindo fins de semana
       let currentDate = new Date(task.start_date + 'T00:00:00')
@@ -850,8 +726,6 @@ export default function AllocationModal({
         const dateStr = currentDate.toISOString().split('T')[0]
         const dayOfWeek = currentDate.getDay() // 0 = domingo, 6 = sábado
         const isWeekendDay = dayOfWeek === 0 || dayOfWeek === 6
-
-        console.log('[MULTI-DAY-DEBUG] 📅 Processando dia:', dateStr, { isWeekend: isWeekendDay, remainingMinutes })
 
         let normalMinutes = 0
         let overtimeMinutes = 0
@@ -863,7 +737,6 @@ export default function AllocationModal({
 
           if (weekendDecision?.useWeekend) {
             // Usuário escolheu TRABALHAR no fim de semana
-            console.log('[WEEKEND-DEBUG] 🏖️ Trabalhando no fim de semana:', dateStr)
             normalMinutes = Math.min(remainingMinutes, weekendDecision.minutesToWork)
             overtimeMinutes = normalMinutes // TODO FIM DE SEMANA É TUDO OVERTIME
             normalMinutes = 0 // Zerar normal pois tudo é overtime
@@ -871,7 +744,6 @@ export default function AllocationModal({
             remainingMinutes -= overtimeMinutes
           } else {
             // Usuário escolheu PULAR fim de semana
-            console.log('[WEEKEND-DEBUG] ⏭️ Pulando fim de semana:', dateStr)
             currentDate.setDate(currentDate.getDate() + 1)
             continue
           }
@@ -900,14 +772,6 @@ export default function AllocationModal({
           }
         }
 
-        console.log('[MULTI-DAY-DEBUG] Dia', dateStr, {
-          isWeekend: isWeekendDay,
-          normalMinutes,
-          overtimeMinutes,
-          overtimeMultiplier,
-          remainingMinutes
-        })
-
         // Criar alocação
         if (normalMinutes > 0 || overtimeMinutes > 0) {
           allocationsToCreate.push({
@@ -927,7 +791,6 @@ export default function AllocationModal({
       }
 
       // Inserir todas as alocações
-      console.log('[MULTI-DAY-DEBUG] Inserindo', allocationsToCreate.length, 'alocações')
       const { error } = await supabase
         .from('allocations')
         .insert(allocationsToCreate)
@@ -962,7 +825,6 @@ export default function AllocationModal({
       await refreshAllocations()
       onSuccess()
     } catch (error: any) {
-      console.error('[MULTI-DAY-DEBUG] Erro ao criar alocações:', error)
       showErrorAlert('Erro ao criar alocações multi-dia')
     } finally {
       setIsSaving(false)
@@ -984,18 +846,14 @@ export default function AllocationModal({
    * 🌊 ONDA 4.3: Processar decisões do modal de fim de semana
    */
   function handleWeekendDecisions(decisions: WeekendDecision[]) {
-    console.log('[WEEKEND-DEBUG] 🎉 Decisões de fim de semana recebidas:', decisions)
-
     // Armazenar decisões
     setWeekendDecisions(decisions)
     setShowWeekendModal(false)
 
     // Agora abrir modal de overflow (se necessário)
     if (multiDayPlan?.requiresUserDecision) {
-      console.log('[WEEKEND-DEBUG] → Abrindo modal de overflow agora...')
       setShowMultiDayModal(true)
     } else {
-      console.log('[WEEKEND-DEBUG] ✅ Sem overflow - criando alocações direto')
       // TODO: Criar alocações com decisões de fim de semana
     }
   }
@@ -1017,10 +875,7 @@ export default function AllocationModal({
    * 🌊 ONDA 5: Processar fragmentos do Planner
    */
   async function handlePlannerConfirm(fragments: AllocationFragment[]) {
-    console.log('[PLANNER-DEBUG] Fragmentos recebidos:', fragments)
-
     if (!pendingAllocation || !selectedResourceForModal) {
-      console.error('[PLANNER-DEBUG] Dados pendentes não encontrados!')
       return
     }
 
@@ -1035,8 +890,6 @@ export default function AllocationModal({
       const isEditMode = existingResourceAllocations.length > 0
 
       if (isEditMode) {
-        console.log('[PLANNER-DEBUG] Modo de edição - deletando alocações antigas')
-
         // Deletar TODAS as alocações deste recurso nesta tarefa
         const { error: deleteError } = await supabase
           .from('allocations')
@@ -1045,7 +898,6 @@ export default function AllocationModal({
           .eq('resource_id', resourceId)
 
         if (deleteError) {
-          console.error('[PLANNER-DEBUG] Erro ao deletar alocações antigas:', deleteError)
           throw deleteError
         }
       }
@@ -1062,15 +914,12 @@ export default function AllocationModal({
         overtime_multiplier: fragment.overtime_multiplier
       }))
 
-      console.log('[PLANNER-DEBUG] Criando alocações:', allocationsToCreate)
-
       // Inserir todas as alocações
       const { error: insertError } = await supabase
         .from('allocations')
         .insert(allocationsToCreate)
 
       if (insertError) {
-        console.error('[PLANNER-DEBUG] Erro ao inserir alocações:', insertError)
         throw insertError
       }
 
@@ -1084,10 +933,9 @@ export default function AllocationModal({
         .limit(1)
 
       if (fetchError) {
-        console.error('[PLANNER-DEBUG] Erro ao buscar alocações para atualizar end_date:', fetchError)
+        // error fetching allocations to update end_date
       } else if (allTaskAllocations && allTaskAllocations.length > 0) {
         const latestEndDate = allTaskAllocations[0].end_date
-        console.log('[PLANNER-DEBUG] Atualizando end_date da tarefa para:', latestEndDate)
 
         const { error: updateTaskError } = await supabase
           .from('tasks')
@@ -1095,8 +943,7 @@ export default function AllocationModal({
           .eq('id', task.id)
 
         if (updateTaskError) {
-          console.error('[PLANNER-DEBUG] Erro ao atualizar end_date da tarefa:', updateTaskError)
-          // Não lançar erro, apenas logar
+          // Não lançar erro, apenas registrar
         }
       }
 
@@ -1219,16 +1066,6 @@ export default function AllocationModal({
       resource: allResources.find(r => r.id === allocation.resource_id)
     }))
     .filter(a => a.resource)
-
-  // Debug: Log quando o modal deveria aparecer mas o recurso não foi encontrado
-  if (showOvertimeDecisionModal && !selectedResourceForModal) {
-    console.error('[OVERFLOW-DEBUG] ❌ Modal deveria abrir mas recurso não foi encontrado:', {
-      selectedResourceId,
-      totalResources: allResources.length,
-      resourceIds: allResources.map(r => r.id),
-      selectedResourceForModalState: selectedResourceForModal
-    })
-  }
 
   return (
     <>

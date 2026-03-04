@@ -26,7 +26,8 @@ export interface Allocation {
   end_date?: string | null
   // 🆕 CAMPOS PREPARATÓRIOS (ONDA 3)
   allocated_minutes?: number | null  // Minutos específicos deste recurso (NULL = 100% da task)
-  overtime_minutes?: number  // Minutos de hora extra (custo × 1.5 ou 2.0)
+  overtime_minutes?: number          // Minutos de hora extra (custo × 1.5 ou 2.0)
+  overtime_multiplier?: number       // Multiplicador de hora extra (1.5 = dia útil, 2.0 = fim de semana/feriado)
   created_at?: string
   updated_at?: string
 }

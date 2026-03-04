@@ -18,6 +18,7 @@ interface CalendarHeaderProps {
   onResetFilters: () => void
   hasActiveFilters: boolean
   onAddEvent: () => void
+  hideZoom?: boolean
 }
 
 /**
@@ -37,6 +38,7 @@ export default function CalendarHeader({
   onResetFilters,
   hasActiveFilters,
   onAddEvent,
+  hideZoom = false,
 }: CalendarHeaderProps) {
   return (
     <div className="bg-white border-b p-4 space-y-4">
@@ -61,8 +63,8 @@ export default function CalendarHeader({
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Zoom Control */}
-          <TimelineZoomControl zoom={zoom} onZoomChange={onZoomChange} />
+          {/* Zoom Control — oculto quando a aba ativa tem controle de zoom próprio */}
+          {!hideZoom && <TimelineZoomControl zoom={zoom} onZoomChange={onZoomChange} />}
 
           {/* Add Personal Event Button */}
           <button
@@ -73,7 +75,7 @@ export default function CalendarHeader({
             <span>Adicionar Evento Pessoal</span>
           </button>
 
-          <MonthNavigator currentMonth={currentMonth} onMonthChange={onMonthChange} />
+          <MonthNavigator currentMonth={currentMonth} zoom={zoom} onMonthChange={onMonthChange} />
         </div>
       </div>
 

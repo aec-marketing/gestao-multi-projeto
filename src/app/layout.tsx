@@ -3,6 +3,7 @@ import './globals.css'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { ResourceProvider } from '@/contexts/ResourceContext'
 import { QueryProvider } from '@/providers/QueryProvider'
+import { ToastProvider } from '@/components/ui/ToastProvider'
 
 export const metadata: Metadata = {
   title: 'Sistema de Gestão Multi-Projeto',
@@ -21,6 +22,7 @@ export default function RootLayout({
           <QueryProvider>
             <ResourceProvider>
               {children}
+              <ToastProvider />
             </ResourceProvider>
           </QueryProvider>
         </ErrorBoundary>

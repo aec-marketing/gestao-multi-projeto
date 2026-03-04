@@ -7,6 +7,7 @@ import AddPredecessorModal from '@/components/modals/AddPredecessorModal'
 import EditPredecessorModal from '@/components/modals/EditPredecessorModal'
 import RecalculateModal from '@/components/modals/RecalculateModal'
 import { showErrorAlert, logError, ErrorContext } from '@/utils/errorHandler'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 // ============ TYPES ============
 interface Predecessor {
@@ -153,7 +154,7 @@ async function handleDeletePredecessor(predecessorId: string) {
     .eq('id', predecessorId)
 
   if (error) {
-    alert('Erro ao deletar predecessor')
+    dispatchToast('Erro ao deletar predecessor', 'error')
     return
   }
 
