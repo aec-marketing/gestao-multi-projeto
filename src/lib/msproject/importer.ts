@@ -46,21 +46,32 @@ function mapPredecessorType(type: 'FF' | 'FS' | 'SF' | 'SS'): string {
 }
 
 /**
- * Inferir tipo de tarefa baseado no nome
+ * Verifica se uma tarefa é uma "Lista de Compras" pelo nome (pai)
  */
-function inferTaskType(taskName: string): string {
+function isPurchaseList(taskName: string): boolean {
+  return taskName.toLowerCase().includes('compra')
+}
+
+/**
+ * Inferir tipo de tarefa baseado no nome
+ * isChildOfPurchase: true quando o pai direto é uma lista de compras
+ */
+function inferTaskType(taskName: string, isChildOfPurchase = false): string {
   const name = taskName.toLowerCase()
-  
+
+  // Filhos de lista de compras → subtarefa (são os fornecedores/itens)
+  if (isChildOfPurchase) return 'subtarefa'
+
   if (name.includes('projeto') && name.includes('mecânico')) return 'projeto_mecanico'
   if (name.includes('projeto') && name.includes('elétrico')) return 'projeto_eletrico'
-  if (name.includes('compra') && name.includes('mecânica')) return 'compras_mecanica'
-  if (name.includes('compra') && name.includes('elétrica')) return 'compras_eletrica'
+  // Qualquer pai com "compra" → lista_compras (mecânica, elétrica, etc.)
+  if (name.includes('compra')) return 'lista_compras'
   if (name.includes('fabricação') || name.includes('fabricacao')) return 'fabricacao'
   if (name.includes('tratamento')) return 'tratamento_superficial'
   if (name.includes('montagem') && name.includes('mecânica')) return 'montagem_mecanica'
   if (name.includes('montagem') && name.includes('elétrica')) return 'montagem_eletrica'
   if (name.includes('coleta')) return 'coleta'
-  
+
   return 'subtarefa' // Padrão
 }
 
@@ -121,12 +132,25 @@ export async function importMSProject(
       return 0
     })
 
+    // Pré-calcular quais outlineNumbers são pais de lista de compras
+    // para que os filhos herdem work_type=wait
+    const purchaseParentOutlines = new Set<string>(
+      sortedTasks
+        .filter(t => t.isSummary && isPurchaseList(t.name))
+        .map(t => t.outlineNumber)
+    )
+
     let tasksCreated = 0
 
     for (const task of sortedTasks) {
       // Calcular parent_id
       const parentOutline = calculateParentOutline(task.outlineNumber)
       const parentId = parentOutline ? outlineToIdMap.get(parentOutline) || null : null
+
+      // Verificar se este task é filho direto de uma lista de compras
+      const isChildOfPurchase = parentOutline ? purchaseParentOutlines.has(parentOutline) : false
+      // Verificar se este task É uma lista de compras (pai)
+      const isSelfPurchase = task.isSummary && isPurchaseList(task.name)
 
       // Detectar tipo de tarefa e calcular duração
       let workType: 'work' | 'wait' | 'milestone'
@@ -136,9 +160,13 @@ export async function importMSProject(
         // Tarefa com duração zero E não é summary = MILESTONE real
         workType = 'milestone'
         durationMinutes = 0
+      } else if (isSelfPurchase || isChildOfPurchase) {
+        // Lista de compras (pai ou filho) → dias corridos (24h/dia = 1440 min/dia)
+        workType = 'wait'
+        const calendarDays = task.durationHours > 0 ? Math.ceil(task.durationHours / 24) : 1
+        durationMinutes = calendarDays * 1440
       } else if (task.isSummary) {
-        // Tarefa summary (pai) = WORK com duração mínima de 1 min
-        // A duração real será recalculada pela soma das subtarefas
+        // Tarefa summary normal = WORK
         workType = 'work'
         durationMinutes = task.duration > 0 ? daysToMinutes(task.duration) : 1
       } else {
@@ -153,7 +181,7 @@ export async function importMSProject(
         .insert({
           project_id: project.id,
           name: task.name,
-          type: inferTaskType(task.name),
+          type: inferTaskType(task.name, isChildOfPurchase),
           parent_id: parentId,
           duration_minutes: durationMinutes,
           work_type: workType,
@@ -225,7 +253,7 @@ export async function importMSProject(
     // Buscar todas as tarefas pai ordenadas por outline_level DESC
     const { data: parentTasks } = await supabase
       .from('tasks')
-      .select('id, outline_level')
+      .select('id, outline_level, type, work_type')
       .eq('project_id', project.id)
       .eq('is_summary', true)
       .order('outline_level', { ascending: false })
@@ -250,7 +278,9 @@ export async function importMSProject(
             const startDate = new Date(minStart)
             const endDate = new Date(maxEnd)
             const durationDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
-            const spanMinutes = durationDays * 540 // base 9h/dia para tarefas pai work
+            // Lista de compras usa dias corridos (1440 min/dia), demais usam dias úteis (540 min/dia)
+            const minutesPerDay = parent.work_type === 'wait' ? 1440 : 540
+            const spanMinutes = durationDays * minutesPerDay
 
             // Atualizar tarefa pai
             await supabase

@@ -80,25 +80,31 @@ export interface AlertThresholds {
   warningWeeklyHours: number // Ex: 35
 }
 
-// Prioridades com cores e descrições
+// Dedicação/Prioridade — controla se o recurso pode ser compartilhado entre tarefas sobrepostas
 export const PRIORITY_CONFIG = {
   alta: {
-    label: 'Alta Prioridade',
+    label: 'Exclusivo',
     color: 'bg-red-100 text-red-800',
     badgeColor: 'bg-red-500',
-    description: 'Tarefa crítica que precisa de atenção imediata'
+    description: 'Recurso dedicado — não pode ter outras tarefas sobrepostas',
+    icon: '🔒',
+    conflictBehavior: 'block' as const, // bloqueia sobreposição
   },
   media: {
-    label: 'Média Prioridade', 
+    label: 'Compartilhado',
     color: 'bg-yellow-100 text-yellow-800',
     badgeColor: 'bg-yellow-500',
-    description: 'Tarefa importante com prazo normal'
+    description: 'Pode dividir tempo com outras tarefas (avisa sobre conflito)',
+    icon: '⚡',
+    conflictBehavior: 'warn' as const, // avisa, mas permite
   },
   baixa: {
-    label: 'Baixa Prioridade',
-    color: 'bg-blue-100 text-blue-800', 
+    label: 'Flexível',
+    color: 'bg-blue-100 text-blue-800',
     badgeColor: 'bg-blue-500',
-    description: 'Tarefa que pode ser feita quando houver tempo'
+    description: 'Alocação livre, sem restrições de sobreposição',
+    icon: '🔓',
+    conflictBehavior: 'allow' as const, // permite sem avisar
   }
 } as const
 

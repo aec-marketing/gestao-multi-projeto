@@ -41,7 +41,7 @@ import { useGanttCalculations } from '@/components/gantt/hooks/useGanttCalculati
 import { useGanttFilters } from '@/components/gantt/hooks/useGanttFilters'
 import { useGanttResize } from '@/components/gantt/hooks/useGanttResize'
 import { useGanttDragDrop } from '@/components/gantt/hooks/useGanttDragDrop'
-import { useGanttSync } from '@/components/gantt/hooks/useGanttSync'
+import { useGanttSync, ExclusiveConflict } from '@/components/gantt/hooks/useGanttSync'
 import { useGanttPendingChanges } from '@/components/gantt/hooks/useGanttPendingChanges'
 import { usePredecessorEditing } from '@/components/gantt/hooks/usePredecessorEditing'
 
@@ -79,6 +79,16 @@ export default function GanttViewTab({
 
   // ========== PREDECESSOR EDITING MODE (ONDA 5.7) ==========
   const predecessorEditing = usePredecessorEditing()
+
+  // ========== MODAL DE CONFLITOS EXCLUSIVOS ==========
+  const [exclusiveConflictsModal, setExclusiveConflictsModal] = useState<ExclusiveConflict[]>([])
+  // Índice do conflito expandido com ações
+  const [expandedConflictIdx, setExpandedConflictIdx] = useState<number | null>(null)
+  // Estado de aplicação de lag (por índice de conflito)
+  const [applyingLag, setApplyingLag] = useState<number | null>(null)
+  // AllocationModal aberto a partir do modal de conflitos
+  const [conflictAllocationTaskId, setConflictAllocationTaskId] = useState<string | null>(null)
+  const [conflictAllocationId, setConflictAllocationId] = useState<string | undefined>(undefined)
 
   // ========== TOOLTIP HOVER ==========
   const [hoveredTask, setHoveredTask] = useState<TaskWithAllocations | null>(null)
@@ -261,7 +271,7 @@ export default function GanttViewTab({
       let nextRow = currentRow + 1
 
       // Se tem subtarefas E está expandida, mapear recursivamente
-      if (task.subtasks && task.subtasks.length > 0 && task.isExpanded) {
+      if (task.subtasks && task.subtasks.length > 0 && state.view.expandedTasks.has(task.id)) {
         for (const subtask of task.subtasks) {
           nextRow = mapTaskRecursive(subtask, nextRow)
         }
@@ -276,7 +286,7 @@ export default function GanttViewTab({
     }
 
     return positionMap
-  }, [sortedTasks])
+  }, [sortedTasks, state.view.expandedTasks])
 
   // ========== GRID DE DATAS ==========
   const dateGrid = useMemo(() => {
@@ -321,7 +331,8 @@ export default function GanttViewTab({
     tasks,
     state.data.predecessors,
     onRefresh,
-    actions.setPendingUpdates
+    actions.setPendingUpdates,
+    (conflicts) => setExclusiveConflictsModal(conflicts)
   )
 
   // ========== CARREGAR PREDECESSORES ==========
@@ -508,6 +519,58 @@ export default function GanttViewTab({
     setSelectedPredecessor({ pred, fromTask, toTask })
   }, [])
 
+  /**
+   * Verifica conflitos de recurso exclusivo após mudanças de data.
+   * Dado um mapa taskId → {start_date, end_date} de tarefas com novas datas,
+   * detecta se recursos 'alta' (exclusivos) ficaram alocados em dois lugares ao mesmo tempo.
+   * Retorna array de mensagens de aviso.
+   */
+  function detectExclusiveConflictsAfterReschedule(
+    updatedTaskDates: Record<string, { start_date: string; end_date: string }>
+  ): string[] {
+    // Montar mapa taskId → datas efetivas (novas ou originais)
+    const effectiveDates: Record<string, { start: Date; end: Date }> = {}
+    for (const t of tasks) {
+      if (!t.start_date || !t.end_date) continue
+      const override = updatedTaskDates[t.id]
+      effectiveDates[t.id] = {
+        start: new Date((override?.start_date ?? t.start_date) + 'T00:00:00'),
+        end:   new Date((override?.end_date   ?? t.end_date)   + 'T00:00:00'),
+      }
+    }
+
+    // Alocações exclusivas (alta) agrupadas por recurso
+    const exclusiveByResource: Record<string, { taskId: string; taskName: string; start: Date; end: Date }[]> = {}
+    for (const alloc of allocations) {
+      if (alloc.priority !== 'alta') continue
+      const dates = effectiveDates[alloc.task_id]
+      if (!dates) continue
+      const taskName = tasks.find(t => t.id === alloc.task_id)?.name ?? alloc.task_id
+      if (!exclusiveByResource[alloc.resource_id]) exclusiveByResource[alloc.resource_id] = []
+      exclusiveByResource[alloc.resource_id].push({ taskId: alloc.task_id, taskName, start: dates.start, end: dates.end })
+    }
+
+    const warnings: string[] = []
+
+    for (const [resourceId, entries] of Object.entries(exclusiveByResource)) {
+      if (entries.length < 2) continue
+      const resourceName = resources.find(r => r.id === resourceId)?.name ?? resourceId
+
+      for (let i = 0; i < entries.length; i++) {
+        for (let j = i + 1; j < entries.length; j++) {
+          const a = entries[i]
+          const b = entries[j]
+          // Sobreposição: a começa antes de b terminar E b começa antes de a terminar
+          if (a.start <= b.end && b.start <= a.end) {
+            warnings.push(`⚠️ ${resourceName}: conflito exclusivo entre "${a.taskName}" e "${b.taskName}"`)
+          }
+        }
+      }
+    }
+
+    return [...new Set(warnings)] // deduplicar
+  }
+
   const handleApplyRecalculations = async () => {
     // PRIMEIRO: Aplicar mudanças pendentes do resize/drag
     const changesToSave = pendingChanges.getPendingChangesArray()
@@ -519,6 +582,7 @@ export default function GanttViewTab({
     }
 
     // SEGUNDO: Aplicar recálculo dos dependentes
+    const updatedTaskDates: Record<string, { start_date: string; end_date: string }> = {}
     for (const update of state.modals.pendingUpdates) {
       await supabase
         .from('tasks')
@@ -527,6 +591,25 @@ export default function GanttViewTab({
           end_date: update.end_date
         })
         .eq('id', update.id)
+      updatedTaskDates[update.id] = { start_date: update.start_date, end_date: update.end_date }
+    }
+    // Incluir mudanças de drag/resize no mapa de datas
+    for (const change of changesToSave) {
+      if (change.changes.start_date || change.changes.end_date) {
+        updatedTaskDates[change.taskId] = {
+          start_date: change.changes.start_date ?? tasks.find(t => t.id === change.taskId)?.start_date ?? '',
+          end_date:   change.changes.end_date   ?? tasks.find(t => t.id === change.taskId)?.end_date   ?? '',
+        }
+      }
+    }
+
+    // TERCEIRO: Verificar conflitos de recurso exclusivo
+    const conflicts = detectExclusiveConflictsAfterReschedule(updatedTaskDates)
+    if (conflicts.length > 0) {
+      dispatchToast(
+        `Conflito de recurso exclusivo detectado após recálculo:\n${conflicts.join('\n')}`,
+        'error'
+      )
     }
 
     // Limpar ambos
@@ -551,6 +634,24 @@ export default function GanttViewTab({
           .from('tasks')
           .update(change.changes)
           .eq('id', change.taskId)
+      }
+
+      // Verificar conflitos de recurso exclusivo após salvar
+      const updatedTaskDates: Record<string, { start_date: string; end_date: string }> = {}
+      for (const change of changesToSave) {
+        if (change.changes.start_date || change.changes.end_date) {
+          updatedTaskDates[change.taskId] = {
+            start_date: change.changes.start_date ?? tasks.find(t => t.id === change.taskId)?.start_date ?? '',
+            end_date:   change.changes.end_date   ?? tasks.find(t => t.id === change.taskId)?.end_date   ?? '',
+          }
+        }
+      }
+      const conflicts = detectExclusiveConflictsAfterReschedule(updatedTaskDates)
+      if (conflicts.length > 0) {
+        dispatchToast(
+          `Conflito de recurso exclusivo detectado:\n${conflicts.join('\n')}`,
+          'error'
+        )
       }
 
       // Limpar pending changes
@@ -815,10 +916,10 @@ export default function GanttViewTab({
     const guideLineColor = level === 0 ? 'bg-red-400' : 'bg-blue-200'
 
     const taskRow = (
-      <div key={task.id} className="flex flex-nowrap border-b hover:bg-gray-50">
+      <div key={task.id} className="flex flex-nowrap border-b hover:bg-gray-50" style={{ height: '48px' }}>
         {/* Nome da tarefa */}
         <div
-          className="border-r px-4 py-3 sticky left-0 bg-white z-10"
+          className="border-r px-4 sticky left-0 bg-white z-10 flex items-center"
           style={{
             width: `${taskColumnWidth}px`,
             minWidth: `${taskColumnWidth}px`,
@@ -845,7 +946,7 @@ export default function GanttViewTab({
 
         {/* Área do timeline */}
         <div
-          className="relative py-2"
+          className="relative"
           style={{
             width: `${dateGrid.length * columnWidth}px`,
             minWidth: `${dateGrid.length * columnWidth}px`,
@@ -880,11 +981,11 @@ export default function GanttViewTab({
                 {/* Barra fantasma ORIGINAL (quando está expandindo) - mostra onde estava */}
                 {isExpanding && (
                   <div
-                    className="absolute h-8 border-2 border-dashed border-gray-400 bg-gray-200 rounded opacity-40 pointer-events-none"
+                    className="absolute h-10 border-2 border-dashed border-gray-400 bg-gray-200 rounded opacity-40 pointer-events-none"
                     style={{
                       left: `${barPosition.left}px`,
                       width: `${barPosition.width}px`,
-                      top: '2px',
+                      top: '4px',
                       zIndex: 5
                     }}
                     title="Posição original"
@@ -893,7 +994,7 @@ export default function GanttViewTab({
 
                 {/* Barra fantasma NOVA - mostra onde vai ficar */}
                 <div
-                  className={`absolute h-8 border-2 border-dashed rounded opacity-50 pointer-events-none flex items-center justify-center ${
+                  className={`absolute h-10 border-2 border-dashed rounded opacity-50 pointer-events-none flex items-center justify-center ${
                     isExpanding ? 'border-green-500 bg-green-200' :
                     isShrinking ? 'border-orange-500 bg-orange-200' :
                     'border-blue-500 bg-blue-200'
@@ -901,7 +1002,7 @@ export default function GanttViewTab({
                   style={{
                     left: `${barPosition.left}px`,
                     width: `${ghostWidth}px`,
-                    top: '2px',
+                    top: '4px',
                     zIndex: 6
                   }}
                   title={`Nova duração: ${(newDuration / 540).toFixed(2)} dias`}
@@ -963,14 +1064,14 @@ export default function GanttViewTab({
                     barStyle={{
                       left: fragmentStyle.left as string,
                       width: fragmentStyle.width as string,
-                      top: '2px',
-                      height: '32px'
+                      top: '4px',
+                      height: '40px'
                     }}
                     getTaskInfo={getTaskInfo}
                     onConnectionComplete={handleCreatePredecessorFromAnchors}
                   >
                     <div
-                      className={`h-8 ${taskColor} rounded cursor-pointer group ${overtimeBorderClass}`}
+                      className={`h-10 ${taskColor} rounded cursor-pointer group ${overtimeBorderClass}`}
                       style={{
                         transition: 'all 0.15s ease-out'
                       }}
@@ -1074,14 +1175,14 @@ export default function GanttViewTab({
                 barStyle={{
                   left: `${barPosition.left}px`,
                   width: `${barPosition.width}px`,
-                  top: '2px',
-                  height: '32px'
+                  top: '4px',
+                  height: '40px'
                 }}
                 getTaskInfo={getTaskInfo}
                 onConnectionComplete={handleCreatePredecessorFromAnchors}
               >
                 <div
-                  className={`h-8 ${taskColorSingle} rounded cursor-pointer group ${
+                  className={`h-10 ${taskColorSingle} rounded cursor-pointer group ${
                     isResizing ? 'ring-2 ring-blue-400 shadow-lg' : ''
                   } ${
                     hasOvertimeSingle ? overtimeClass : durationClass
@@ -1335,7 +1436,7 @@ export default function GanttViewTab({
           </div>
 
           {/* Container de conteúdo */}
-          <div className="relative">
+          <div className="relative" style={{ width: `${taskColumnWidth + dateGrid.length * columnWidth}px` }}>
             {/* Lista de tarefas */}
             <div className="relative z-10">
               {sortedTasks.map((task) => renderTaskRecursive(task, 0))}
@@ -1476,8 +1577,9 @@ export default function GanttViewTab({
         <AllocationModal
           task={state.modals.allocationTask}
           projectLeaderId={null}
-          onClose={() => actions.closeModal('allocationTask')}
-          onSuccess={onRefresh}
+          allocationId={conflictAllocationId}
+          onClose={() => { actions.closeModal('allocationTask'); setConflictAllocationId(undefined); setConflictAllocationTaskId(null) }}
+          onSuccess={() => { onRefresh(); setConflictAllocationId(undefined); setConflictAllocationTaskId(null) }}
         />
       )}
 
@@ -1507,6 +1609,205 @@ export default function GanttViewTab({
         onClose={() => actions.closeModal('showCycleAudit')}
         onRefresh={onRefresh}
       />
+
+      {/* Modal de conflitos de recurso exclusivo */}
+      {exclusiveConflictsModal.length > 0 && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-xl w-full flex flex-col max-h-[85vh]">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b flex-shrink-0">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">⚠️ Conflitos de Recurso Exclusivo</h3>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {exclusiveConflictsModal.length} conflito(s) — mesmo recurso alocado exclusivamente em duas tarefas simultâneas
+                </p>
+              </div>
+              <button onClick={() => { setExclusiveConflictsModal([]); setExpandedConflictIdx(null) }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+
+            {/* Lista de conflitos */}
+            <div className="overflow-y-auto flex-1 p-4 space-y-3">
+              {exclusiveConflictsModal.map((c, i) => {
+                const isExpanded = expandedConflictIdx === i
+
+                // Calcular lag necessário para resolver o conflito:
+                // A tarefa empurrada precisa começar APÓS o fim da tarefa que está ocupando o dia.
+                // O predecessor relevante é o da tarefa empurrada (ex: Tarefa 1 → Tarefa 3).
+                // lag_adicional = conflictingEnd - fim_predecessora - lag_atual (em dias)
+                const hasPred = !!c.predecessor
+                let lagNeeded = 1
+                let newSuccessorStart = ''
+                if (hasPred) {
+                  const pred = c.predecessor!
+                  const predTask = tasks.find(t => t.id === pred.predecessorTaskId)
+                  const conflictingEnd = c.conflictingTaskEnd
+                    ? new Date(c.conflictingTaskEnd + 'T00:00:00')
+                    : null
+
+                  if (predTask?.end_date && conflictingEnd) {
+                    const predEnd = new Date(predTask.end_date + 'T00:00:00')
+                    // Sucessor atual começa em: predEnd + 1 + lag_atual
+                    // Precisa começar em: conflictingEnd + 1
+                    // lag_adicional = conflictingEnd - predEnd - lag_atual
+                    const lagTotalNeeded = Math.ceil((conflictingEnd.getTime() - predEnd.getTime()) / 86400000)
+                    lagNeeded = Math.max(1, lagTotalNeeded - (pred.lag_time ?? 0))
+
+                    // Nova data de início do sucessor = conflictingEnd + 1 dia
+                    const newStart = new Date(conflictingEnd)
+                    newStart.setDate(newStart.getDate() + 1)
+                    newSuccessorStart = newStart.toLocaleDateString('pt-BR')
+                  }
+                }
+
+                return (
+                  <div key={i} className="border border-red-200 rounded-lg overflow-hidden">
+                    {/* Cabeçalho do conflito */}
+                    <div
+                      className="flex items-center justify-between p-3 bg-red-50 cursor-pointer hover:bg-red-100 transition-colors"
+                      onClick={() => setExpandedConflictIdx(isExpanded ? null : i)}
+                    >
+                      <div className="flex items-center gap-2 text-sm min-w-0">
+                        <span className="text-red-500 flex-shrink-0">🔒</span>
+                        <span className="font-semibold text-red-800 flex-shrink-0">{c.resourceName}</span>
+                        <span className="text-red-400 flex-shrink-0">—</span>
+                        <span className="text-red-700 truncate">
+                          <span className="font-medium">{c.taskA}</span>
+                          <span className="mx-1 text-red-400">↔</span>
+                          <span className="font-medium">{c.taskB}</span>
+                        </span>
+                      </div>
+                      <span className="text-gray-400 flex-shrink-0 ml-2">{isExpanded ? '▲' : '▼'}</span>
+                    </div>
+
+                    {/* Painel de ações expandido */}
+                    {isExpanded && (
+                      <div className="p-4 bg-white border-t border-red-100 space-y-4">
+                        {/* Datas das tarefas */}
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                          <div className="p-2 bg-gray-50 rounded border">
+                            <p className="font-semibold text-gray-700 mb-1">{c.taskA}</p>
+                            <p className="text-gray-500">{new Date(c.taskAStart + 'T00:00:00').toLocaleDateString('pt-BR')} → {new Date(c.taskAEnd + 'T00:00:00').toLocaleDateString('pt-BR')}</p>
+                          </div>
+                          <div className="p-2 bg-gray-50 rounded border">
+                            <p className="font-semibold text-gray-700 mb-1">{c.taskB}</p>
+                            <p className="text-gray-500">{new Date(c.taskBStart + 'T00:00:00').toLocaleDateString('pt-BR')} → {new Date(c.taskBEnd + 'T00:00:00').toLocaleDateString('pt-BR')}</p>
+                          </div>
+                        </div>
+
+                        {/* Ação 1: Lag day (só se existe predecessor) */}
+                        {hasPred ? (
+                          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                            <p className="text-sm font-semibold text-blue-800 mb-1">📅 Adicionar lag day ao predecessor</p>
+                            <p className="text-xs text-blue-700 mb-3">
+                              Adicionar <strong>{lagNeeded} dia(s)</strong> de lag ao predecessor entre essas tarefas.
+                              {newSuccessorStart && <> A tarefa <strong>{c.predecessor!.successorTaskId === c.taskBId ? c.taskB : c.taskA}</strong> passará a iniciar em <strong>{newSuccessorStart}</strong>.</>}
+                            </p>
+                            <button
+                              disabled={applyingLag === i}
+                              onClick={async () => {
+                                setApplyingLag(i)
+                                try {
+                                  const pred = c.predecessor!
+                                  const newLagTime = (pred.lag_time ?? 0) + lagNeeded
+                                  const newLagMinutes = pred.lag_minutes != null
+                                    ? pred.lag_minutes + lagNeeded * 540
+                                    : undefined
+
+                                  // Atualizar predecessor no banco
+                                  await supabase
+                                    .from('predecessors')
+                                    .update({
+                                      lag_time: newLagTime,
+                                      ...(newLagMinutes != null ? { lag_minutes: newLagMinutes } : {})
+                                    })
+                                    .eq('id', pred.id)
+
+                                  // Recalcular em cascata a partir da tarefa predecessora
+                                  const tasksCopy = tasks.map(t => ({ ...t }))
+                                  const predsCopy = state.data.predecessors.map(p =>
+                                    p.id === pred.id
+                                      ? { ...p, lag_time: newLagTime, ...(newLagMinutes != null ? { lag_minutes: newLagMinutes } : {}) }
+                                      : p
+                                  )
+                                  const updates = recalculateTasksInCascade(pred.predecessorTaskId, tasksCopy, predsCopy)
+
+                                  if (updates.length > 0) {
+                                    actions.setPendingUpdates(updates)
+                                    actions.openModal('showRecalculate')
+                                  }
+                                  setExclusiveConflictsModal([])
+                                  setExpandedConflictIdx(null)
+                                } catch {
+                                  dispatchToast('Erro ao aplicar lag', 'error')
+                                } finally {
+                                  setApplyingLag(null)
+                                }
+                              }}
+                              className="w-full px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                            >
+                              {applyingLag === i ? 'Aplicando...' : `✓ Aplicar +${lagNeeded} dia(s) de lag`}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-500">
+                            💡 Não há relação de predecessor entre essas tarefas. Para usar lag day, primeiro adicione um predecessor entre elas.
+                          </div>
+                        )}
+
+                        {/* Ação 2: Substituir recurso */}
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                          <p className="text-sm font-semibold text-amber-800 mb-2">👤 Substituir recurso em uma das tarefas</p>
+                          <p className="text-xs text-amber-700 mb-3">Escolha em qual tarefa o recurso <strong>{c.resourceName}</strong> deve ser substituído:</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => {
+                                const task = tasks.find(t => t.id === c.taskAId)
+                                if (!task) return
+                                setConflictAllocationTaskId(c.taskAId)
+                                setConflictAllocationId(c.taskAAllocationId)
+                                setExclusiveConflictsModal([])
+                                setExpandedConflictIdx(null)
+                                actions.openModal('allocationTask', task)
+                              }}
+                              className="px-3 py-2 bg-amber-600 text-white text-xs font-medium rounded-lg hover:bg-amber-700 transition-colors"
+                            >
+                              ✏️ {c.taskA}
+                            </button>
+                            <button
+                              onClick={() => {
+                                const task = tasks.find(t => t.id === c.taskBId)
+                                if (!task) return
+                                setConflictAllocationTaskId(c.taskBId)
+                                setConflictAllocationId(c.taskBAllocationId)
+                                setExclusiveConflictsModal([])
+                                setExpandedConflictIdx(null)
+                                actions.openModal('allocationTask', task)
+                              }}
+                              className="px-3 py-2 bg-amber-600 text-white text-xs font-medium rounded-lg hover:bg-amber-700 transition-colors"
+                            >
+                              ✏️ {c.taskB}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t bg-gray-50 rounded-b-xl flex-shrink-0">
+              <button
+                onClick={() => { setExclusiveConflictsModal([]); setExpandedConflictIdx(null) }}
+                className="w-full px-4 py-2 bg-gray-800 text-white text-sm font-medium rounded-lg hover:bg-gray-900 transition-colors"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Menu rápido de predecessor - ONDA 5.7 */}
       {selectedPredecessor && (

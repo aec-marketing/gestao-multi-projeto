@@ -24,6 +24,9 @@ export interface ResourceConflict {
   message: string
   date: string
   details?: unknown
+  existingPriority?: 'alta' | 'media' | 'baixa' // Dedicação da alocação existente
+  projectName?: string
+  taskName?: string
 }
 
 /**
@@ -86,12 +89,12 @@ export async function checkAllocationConflicts(
   const conflicts: ResourceConflict[] = []
 
   try {
-    // Get existing allocations for this resource
+    // Get existing allocations for this resource (with project info for global conflict detection)
     const { data: existingAllocations, error } = await supabase
       .from('allocations')
       .select(`
         *,
-        task:tasks(id, name, start_date, end_date)
+        task:tasks(id, name, start_date, end_date, project:projects(id, name, code))
       `)
       .eq('resource_id', resourceId)
 
@@ -122,10 +125,15 @@ export async function checkAllocationConflicts(
 
       // Check for overlap
       if (allocStart <= end && allocEnd >= start) {
+        const project = allocation.task.project
+        const projectLabel = project ? `[${project.code}] ${project.name}` : 'outro projeto'
         conflicts.push({
           type: 'allocation_overlap',
-          message: `Recurso já alocado na tarefa "${allocation.task.name}" de ${allocation.task.start_date} a ${allocation.task.end_date}`,
+          message: `Alocado em "${allocation.task.name}" (${projectLabel}) — ${allocation.task.start_date} a ${allocation.task.end_date}`,
           date: allocation.task.start_date,
+          existingPriority: (allocation.priority as 'alta' | 'media' | 'baixa') || 'media',
+          projectName: project ? `${project.code} - ${project.name}` : undefined,
+          taskName: allocation.task.name,
           details: { allocationId: allocation.id, taskName: allocation.task.name }
         })
       }

@@ -39,16 +39,21 @@ interface XMLProject {
 }
 
 /**
- * Parse da duração ISO 8601 para dias
+ * Extrai horas brutas de uma duração ISO 8601
+ * Exemplo: PT88H0M0S → 88
+ */
+function parseHours(isoDuration: string): number {
+  if (!isoDuration) return 0
+  const hourMatch = isoDuration.match(/PT(\d+)H/)
+  return hourMatch ? parseInt(hourMatch[1]) : 0
+}
+
+/**
+ * Parse da duração ISO 8601 para dias úteis (8h/dia)
  * Exemplo: PT88H0M0S → 11 dias (88h / 8h por dia)
  */
 function parseDuration(isoDuration: string): number {
-  if (!isoDuration) return 0
-  
-  const hourMatch = isoDuration.match(/PT(\d+)H/)
-  if (!hourMatch) return 0
-  
-  const hours = parseInt(hourMatch[1])
+  const hours = parseHours(isoDuration)
   return Math.ceil(hours / 8) // 8 horas por dia útil
 }
 
@@ -157,6 +162,7 @@ export async function parseMSProjectXML(xmlContent: string): Promise<ImportPrevi
       start: new Date(xmlTask.Start),
       finish: new Date(xmlTask.Finish),
       duration: parseDuration(xmlTask.Duration),
+      durationHours: parseHours(xmlTask.Duration),
       percentComplete: xmlTask.PercentComplete || 0,
       isSummary: xmlTask.Summary === 1,
       isCritical: xmlTask.Critical === 1,

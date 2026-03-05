@@ -20,6 +20,11 @@ export interface PlannerDay {
 
   // Capacidade
   dailyCapacityMinutes: number
+
+  // Substituição parcial: recurso conflitado neste dia
+  isConflicted?: boolean           // Dia tem conflito com outro recurso exclusivo
+  substituteResourceId?: string    // Recurso substituto selecionado para este dia
+  substituteResourceName?: string
 }
 
 export interface AllocationFragment {
@@ -28,6 +33,17 @@ export interface AllocationFragment {
   allocated_minutes: number
   overtime_minutes: number
   overtime_multiplier: number
+  resource_id?: string  // Preenchido quando é um fragmento de substituto
+  resource_name?: string
+}
+
+export interface SubstituteResource {
+  id: string
+  name: string
+  hierarchy: string
+  role: string | null
+  daily_capacity_minutes: number
+  hourly_rate: number
 }
 
 interface AllocationPlannerProps {
@@ -43,6 +59,9 @@ interface AllocationPlannerProps {
   // Modo de edição
   editMode?: boolean
   existingFragments?: AllocationFragment[]
+  // Substituição parcial: dias conflitados e substitutos disponíveis
+  conflictedDays?: Record<string, string>  // date → nome do recurso que bloqueia
+  substituteResources?: SubstituteResource[]
 }
 
 export function AllocationPlanner({
@@ -55,12 +74,16 @@ export function AllocationPlanner({
   onConfirm,
   onCancel,
   editMode = false,
-  existingFragments = []
+  existingFragments = [],
+  conflictedDays = {},
+  substituteResources = []
 }: AllocationPlannerProps) {
   // Estado de configuração de hora extra
   const [overtimeEnabled, setOvertimeEnabled] = useState(false)
   const [maxOvertimeHours, setMaxOvertimeHours] = useState<1 | 2>(1)
   const [overtimeDropdownDayIndex, setOvertimeDropdownDayIndex] = useState<number | null>(null)
+  // Dropdown de substituto aberto para qual dia
+  const [substituteDropdownDayIndex, setSubstituteDropdownDayIndex] = useState<number | null>(null)
 
   // Calcular plano inicial (dias úteis necessários OU carregar fragmentos existentes)
   const initialDays = useMemo(() => {
@@ -142,6 +165,12 @@ export function AllocationPlanner({
 
           const hasOvertime = dayOvertimeMinutes > 0 || fragment.overtime_multiplier > 1.0
 
+          // Restaurar substituto se o fragmento pertence a outro recurso
+          const isSubstituteFragment = !!fragment.resource_id
+          const substituteRes = isSubstituteFragment
+            ? substituteResources.find(s => s.id === fragment.resource_id)
+            : undefined
+
           days.push({
             date: dateStr,
             dayOfWeek: dayName,
@@ -151,7 +180,10 @@ export function AllocationPlanner({
             allocatedMinutes: dayAllocatedMinutes,
             overtimeMinutes: dayOvertimeMinutes,
             overtimeMultiplier: fragment.overtime_multiplier,
-            dailyCapacityMinutes: resourceDailyCapacityMinutes
+            dailyCapacityMinutes: resourceDailyCapacityMinutes,
+            isConflicted: !!conflictedDays[dateStr],
+            substituteResourceId: substituteRes?.id,
+            substituteResourceName: substituteRes?.name ?? fragment.resource_name,
           })
         } else {
           // Dia não alocado
@@ -164,7 +196,8 @@ export function AllocationPlanner({
             allocatedMinutes: 0,
             overtimeMinutes: 0,
             overtimeMultiplier: 1.0,
-            dailyCapacityMinutes: resourceDailyCapacityMinutes
+            dailyCapacityMinutes: resourceDailyCapacityMinutes,
+            isConflicted: !!conflictedDays[dateStr],
           })
         }
 
@@ -188,8 +221,11 @@ export function AllocationPlanner({
       const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
       const dayName = dayNames[dayOfWeek]
 
-      // Por padrão, selecionar apenas dias úteis
-      const isSelected = !isWeekend && remainingMinutes > 0
+      // Verificar se este dia tem conflito (recurso bloqueado)
+      const isConflictedDay = !!conflictedDays[dateStr]
+
+      // Por padrão, selecionar apenas dias úteis que não têm conflito
+      const isSelected = !isWeekend && remainingMinutes > 0 && !isConflictedDay
       const allocatedMinutes = isSelected ? Math.min(remainingMinutes, resourceDailyCapacityMinutes) : 0
 
       days.push({
@@ -201,18 +237,20 @@ export function AllocationPlanner({
         allocatedMinutes,
         overtimeMinutes: 0,
         overtimeMultiplier: 1.0,
-        dailyCapacityMinutes: resourceDailyCapacityMinutes
+        dailyCapacityMinutes: resourceDailyCapacityMinutes,
+        isConflicted: isConflictedDay,
       })
 
       if (isSelected) {
         remainingMinutes -= allocatedMinutes
       }
+      // Dias conflitados não consomem os minutos restantes (serão cobertos por substituto)
 
       currentDate.setDate(currentDate.getDate() + 1)
     }
 
     return days
-  }, [taskStartDate, totalMinutes, resourceDailyCapacityMinutes, editMode, existingFragments])
+  }, [taskStartDate, totalMinutes, resourceDailyCapacityMinutes, editMode, existingFragments, conflictedDays, substituteResources])
 
   const [days, setDays] = useState<PlannerDay[]>(initialDays)
 
@@ -465,6 +503,35 @@ export function AllocationPlanner({
       return newDays
     }
 
+    // Se falta minutos (totalAllocated < totalMinutes), expandir para dias disponíveis
+    const missing = totalMinutes - totalAllocated
+    if (missing > 0) {
+      const newDays = [...updatedDays]
+      let remaining = missing
+
+      for (let i = 0; i < newDays.length && remaining > 0; i++) {
+        const day = newDays[i]
+
+        // Só expandir para dias vagos (none), não conflitados, não fim de semana
+        if (day.workMode !== 'none') continue
+        if (day.isConflicted) continue
+        if (day.isWeekend) continue
+
+        // Preencher com o que couber na capacidade diária
+        const fill = Math.min(day.dailyCapacityMinutes, remaining)
+        newDays[i] = {
+          ...day,
+          isSelected: true,
+          workMode: 'normal',
+          allocatedMinutes: fill,
+          overtimeMinutes: 0,
+        }
+        remaining -= fill
+      }
+
+      return newDays
+    }
+
     return updatedDays
   }
 
@@ -496,7 +563,8 @@ export function AllocationPlanner({
         !isConsecutive(prevDay.date, day.date) || // Não consecutivo
         prevDay.overtimeMultiplier !== day.overtimeMultiplier || // Mudou multiplicador
         prevDay.isWeekend !== day.isWeekend || // Mudou tipo de dia
-        (prevDay.overtimeMinutes > 0) !== (day.overtimeMinutes > 0) // Mudou overtime on/off
+        (prevDay.overtimeMinutes > 0) !== (day.overtimeMinutes > 0) || // Mudou overtime on/off
+        prevDay.substituteResourceId !== day.substituteResourceId // Mudou substituto
 
       if (shouldBreak && currentGroup.length > 0) {
         // Salvar grupo anterior
@@ -534,13 +602,16 @@ export function AllocationPlanner({
     const totalAllocated = group.reduce((sum, d) => sum + d.allocatedMinutes, 0)
     const totalOvertime = group.reduce((sum, d) => sum + d.overtimeMinutes, 0)
     const multiplier = group[0].overtimeMultiplier
+    const substituteId = group[0].substituteResourceId
+    const substituteName = group[0].substituteResourceName
 
     return {
       start_date: group[0].date,
       end_date: group[group.length - 1].date,
       allocated_minutes: totalAllocated,
       overtime_minutes: totalOvertime,
-      overtime_multiplier: multiplier
+      overtime_multiplier: multiplier,
+      ...(substituteId ? { resource_id: substituteId, resource_name: substituteName } : {})
     }
   }
 
@@ -861,6 +932,8 @@ export function AllocationPlanner({
                     const dayDate = new Date(day.date + 'T00:00:00')
                     const isBlocked = dayDate < taskStart
                     const isTaskStartDay = dayDate.getTime() === taskStart.getTime()
+                    const isConflicted = day.isConflicted && !isBlocked
+                    const hasSubstitute = !!day.substituteResourceId
 
                     // Cores baseadas no estado
                     let borderColor = 'border-gray-300'
@@ -872,6 +945,16 @@ export function AllocationPlanner({
                       borderColor = 'border-gray-200'
                       bgColor = 'bg-gray-50'
                       textColor = 'text-gray-300'
+                    } else if (isConflicted && hasSubstitute) {
+                      // Dia conflitado COM substituto escolhido: amarelo-verde
+                      borderColor = 'border-emerald-500'
+                      bgColor = 'bg-emerald-50'
+                      textColor = 'text-emerald-900'
+                    } else if (isConflicted) {
+                      // Dia conflitado SEM substituto: amarelo/laranja
+                      borderColor = 'border-amber-500'
+                      bgColor = 'bg-amber-50'
+                      textColor = 'text-amber-900'
                     } else if (isTaskStartDay) {
                       // Dia inicial da tarefa - VERDE com borda grossa
                       if (day.workMode === 'normal') {
@@ -911,18 +994,24 @@ export function AllocationPlanner({
                     return (
                       <div key={day.date} className="relative">
                         <button
-                          onClick={() => handleDayClick(absoluteIndex)}
+                          onClick={() => isConflicted
+                            ? setSubstituteDropdownDayIndex(substituteDropdownDayIndex === absoluteIndex ? null : absoluteIndex)
+                            : handleDayClick(absoluteIndex)
+                          }
                           disabled={isBlocked}
                           className={`
                             w-full ${bgColor} ${borderColor} ${textColor}
                             ${isTaskStartDay ? 'border-4' : 'border-2'} rounded-lg p-3 text-center transition-all
                             ${isBlocked ? 'cursor-not-allowed opacity-40' : 'hover:shadow-md hover:scale-105'}
-                            ${day.workMode === 'none' && !isBlocked ? 'opacity-60' : 'opacity-100'}
+                            ${day.workMode === 'none' && !isBlocked && !isConflicted ? 'opacity-60' : 'opacity-100'}
                             ${isTaskStartDay ? 'ring-2 ring-green-300' : ''}
+                            ${isConflicted ? 'ring-2 ring-amber-300' : ''}
                           `}
                           title={
                             isBlocked
                               ? 'Dia bloqueado - anterior ao início da tarefa'
+                              : isConflicted
+                              ? `⚠️ ${conflictedDays[day.date]} exclusivo neste dia — clique para escolher substituto`
                               : isTaskStartDay
                               ? '📌 Início da tarefa (não pode ser desmarcado)'
                               : ''
@@ -931,6 +1020,7 @@ export function AllocationPlanner({
                           <div className="text-xs font-medium mb-1">
                             {day.dayOfWeek}
                             {isTaskStartDay && <span className="ml-1">📌</span>}
+                            {isConflicted && <span className="ml-1">⚠️</span>}
                           </div>
                           <div className="text-lg font-bold">
                             {new Date(day.date + 'T00:00:00').getDate()}
@@ -939,15 +1029,23 @@ export function AllocationPlanner({
                             {isBlocked && (
                               <span className="text-gray-300">🔒</span>
                             )}
-                            {!isBlocked && day.workMode === 'none' && (
+                            {isConflicted && !hasSubstitute && (
+                              <span className="text-amber-700 font-medium">Escolher sub.</span>
+                            )}
+                            {isConflicted && hasSubstitute && (
+                              <span className="text-emerald-700 font-semibold truncate block max-w-full" title={day.substituteResourceName}>
+                                👤 {day.substituteResourceName?.split(' ')[0]}
+                              </span>
+                            )}
+                            {!isBlocked && !isConflicted && day.workMode === 'none' && (
                               <span className="text-gray-400">[ ]</span>
                             )}
-                            {!isBlocked && day.workMode === 'normal' && (
+                            {!isBlocked && !isConflicted && day.workMode === 'normal' && (
                               <span className={isTaskStartDay ? "text-green-700 font-semibold" : "text-blue-700"}>
                                 ✓ {formatMinutes(day.allocatedMinutes)}
                               </span>
                             )}
-                            {!isBlocked && day.workMode === 'overtime' && (
+                            {!isBlocked && !isConflicted && day.workMode === 'overtime' && (
                               <span className={day.isWeekend ? "text-red-700 font-bold" : isTaskStartDay ? "text-green-700 font-bold" : "text-orange-700"}>
                                 ⚡ {formatMinutes(day.allocatedMinutes + day.overtimeMinutes)}
                                 {day.isWeekend && <span className="text-[10px]"> 2.0×</span>}
@@ -955,6 +1053,75 @@ export function AllocationPlanner({
                             )}
                           </div>
                         </button>
+
+                        {/* Dropdown de substituto para dias conflitados */}
+                        {isConflicted && substituteDropdownDayIndex === absoluteIndex && (
+                          <div className="absolute top-full left-0 mt-1 bg-white border-2 border-amber-400 rounded-lg shadow-xl z-20 p-2 min-w-[160px]">
+                            <div className="text-xs font-semibold text-gray-700 mb-1.5">Substituto para este dia:</div>
+                            {substituteResources.length === 0 ? (
+                              <div className="text-xs text-gray-500 py-1">Nenhum disponível</div>
+                            ) : (
+                              substituteResources.map(sub => (
+                                <button
+                                  key={sub.id}
+                                  onClick={() => {
+                                    const newDays = [...days]
+                                    // Calcular quanto dos minutos restantes este dia deve cobrir
+                                    const minutesBeforeThisDay = newDays
+                                      .slice(0, absoluteIndex)
+                                      .reduce((sum, d) => sum + (d.workMode !== 'none' ? d.allocatedMinutes + d.overtimeMinutes : 0), 0)
+                                    const minutesRemainingForThisDay = Math.max(0, totalMinutes - minutesBeforeThisDay)
+                                    const dayCapacity = Math.min(sub.daily_capacity_minutes, minutesRemainingForThisDay)
+                                    newDays[absoluteIndex] = {
+                                      ...days[absoluteIndex],
+                                      substituteResourceId: sub.id,
+                                      substituteResourceName: sub.name,
+                                      workMode: 'normal',
+                                      isSelected: true,
+                                      allocatedMinutes: dayCapacity,
+                                    }
+                                    // Recalcular para desmarcar dias que ficaram desnecessários
+                                    setDays(recalculateDaysDistribution(newDays))
+                                    setSubstituteDropdownDayIndex(null)
+                                  }}
+                                  className={`w-full text-left px-2 py-1.5 text-xs rounded hover:bg-amber-50 transition-colors mb-0.5 ${
+                                    day.substituteResourceId === sub.id ? 'bg-emerald-100 font-semibold' : ''
+                                  }`}
+                                >
+                                  👤 {sub.name}
+                                  {sub.role && <span className="text-gray-500 ml-1">({sub.role})</span>}
+                                </button>
+                              ))
+                            )}
+                            {day.substituteResourceId && (
+                              <button
+                                onClick={() => {
+                                  const newDays = [...days]
+                                  newDays[absoluteIndex] = {
+                                    ...days[absoluteIndex],
+                                    substituteResourceId: undefined,
+                                    substituteResourceName: undefined,
+                                    workMode: 'none',
+                                    isSelected: false,
+                                    allocatedMinutes: 0,
+                                  }
+                                  // Recalcular para re-adicionar dias que ficaram sem cobertura
+                                  setDays(recalculateDaysDistribution(newDays))
+                                  setSubstituteDropdownDayIndex(null)
+                                }}
+                                className="w-full text-left px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded mt-1 border-t border-gray-100 pt-1.5"
+                              >
+                                ✕ Remover substituto
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setSubstituteDropdownDayIndex(null)}
+                              className="w-full mt-1 px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-200"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        )}
 
                         {/* Dropdown de hora extra */}
                         {overtimeDropdownDayIndex === absoluteIndex && (
@@ -1008,7 +1175,7 @@ export function AllocationPlanner({
                 <span>⚡ Fim de Semana (2.0×)</span>
               </div>
             </div>
-            <div className="flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-4 text-xs flex-wrap">
               <div className="flex items-center gap-1">
                 <div className="w-4 h-4 border-4 border-green-600 bg-green-50 rounded ring-2 ring-green-300"></div>
                 <span className="text-green-700 font-semibold">📌 Início da Tarefa (fixo)</span>
@@ -1017,6 +1184,18 @@ export function AllocationPlanner({
                 <div className="w-4 h-4 border-2 border-gray-200 bg-gray-50 rounded opacity-40"></div>
                 <span className="text-gray-400">🔒 Dia bloqueado</span>
               </div>
+              {Object.keys(conflictedDays).length > 0 && (
+                <>
+                  <div className="flex items-center gap-1">
+                    <div className="w-4 h-4 border-2 border-amber-500 bg-amber-50 rounded ring-2 ring-amber-300"></div>
+                    <span className="text-amber-700">⚠️ Conflito — clique p/ escolher substituto</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-4 h-4 border-2 border-emerald-500 bg-emerald-50 rounded"></div>
+                    <span className="text-emerald-700">👤 Substituto definido</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

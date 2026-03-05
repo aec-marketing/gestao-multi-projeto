@@ -236,7 +236,8 @@ export interface MSProjectTask {
   outlineLevel: number         // 0, 1, 2, 3...
   start: Date
   finish: Date
-  duration: number             // Em dias
+  duration: number             // Em dias (dias úteis, 8h/dia)
+  durationHours: number        // Horas brutas do XML (para cálculo correto de tarefas wait)
   percentComplete: number
   isSummary: boolean
   isCritical: boolean

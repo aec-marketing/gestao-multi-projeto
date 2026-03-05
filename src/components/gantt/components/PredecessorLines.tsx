@@ -91,6 +91,7 @@ export function PredecessorLines({
   editingMode = false
 }: PredecessorLinesProps) {
   const [hoveredLine, setHoveredLine] = React.useState<string | null>(null)
+  const [hoveredGroup, setHoveredGroup] = React.useState<string | null>(null)
 
   // Cores por tipo de predecessor
   function getPredecessorColor(type: string): string {
@@ -181,29 +182,7 @@ export function PredecessorLines({
     return maxOffset
   }
 
-  // ONDA 3: Obter data de fim efetiva (última alocação se fragmentada)
-  function getEffectiveEndDate(task: TaskWithDates): Date | string {
-    const taskWithAlloc = task as TaskWithAllocations
-    const allocations = taskWithAlloc.allocations || []
-
-    // Se tem múltiplas alocações (fragmentada), usar a última
-    if (allocations.length > 1) {
-      const sorted = [...allocations].sort((a, b) =>
-        new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
-      )
-      return sorted[sorted.length - 1].end_date
-    }
-
-    // Se só tem uma alocação, usar ela
-    if (allocations.length === 1) {
-      return allocations[0].end_date
-    }
-
-    // Senão, usar end_date da tarefa
-    return task.end_date
-  }
-
-  // Calcula posição X de uma data (com offset intra-dia para tarefas com predecessores FS)
+  // Calcula posição X de uma data (borda esquerda do dia)
   function getDateX(date: Date | string | null, task?: TaskWithDates): number {
     if (!date) return 0
     const dateObj = parseDate(date)
@@ -220,6 +199,35 @@ export function PredecessorLines({
     const intraDayOffset = task ? getIntraDayOffset(task) : 0
 
     return (days + intraDayOffset) * columnWidth + taskColumnWidth
+  }
+
+  // Calcula o X exato do fim visual da barra de uma tarefa,
+  // levando em conta allocated_minutes / duration_minutes (pode ser fracionário)
+  function getTaskBarEndX(task: TaskWithDates): number {
+    const taskWithAlloc = task as TaskWithAllocations
+    const allocations = (taskWithAlloc.allocations || []).filter(a => a.allocated_minutes && a.allocated_minutes > 0)
+
+    if (allocations.length >= 1) {
+      // Usar a última alocação (fragmentada ou não)
+      const sorted = [...allocations].sort((a, b) =>
+        new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+      )
+      const last = sorted[sorted.length - 1]
+      const startX = getDateX(last.start_date)
+      const durationDays = (last.allocated_minutes || 540) / 540
+      return startX + durationDays * columnWidth
+    }
+
+    // Sem alocações: usar start_date + duration_minutes da tarefa
+    const minutesPerDay = task.work_type === 'wait' ? 1440 : 540
+    const durationDays = (task.duration_minutes ?? 540) / minutesPerDay
+    const intraDayOffset = getIntraDayOffset(task)
+    const normalizedStart = new Date(dateRange.minDate)
+    normalizedStart.setHours(0, 0, 0, 0)
+    const taskStart = new Date(parseDate(task.start_date))
+    taskStart.setHours(0, 0, 0, 0)
+    const dayIndex = Math.round((taskStart.getTime() - normalizedStart.getTime()) / (1000 * 60 * 60 * 24))
+    return (dayIndex + intraDayOffset + durationDays) * columnWidth + taskColumnWidth
   }
 
   // MAPEAMENTO RECURSIVO DE POSIÇÕES Y (copiado do componente antigo)
@@ -272,46 +280,78 @@ export function PredecessorLines({
     return task.duration_days || 1
   }
 
-  // Gerar path SVG com linhas retas (ângulos retos)
+  // Gerar path SVG estilo MS Project — linha única (não-grupo)
+  // trunkX: X do tronco vertical a usar (null = calcular automaticamente)
   function generatePath(
     fromTask: TaskWithDates,
     toTask: TaskWithDates,
-    type: string
+    type: string,
+    trunkX: number | null = null
   ): string {
     const normalizedType = type === 'fim_inicio' ? 'FS' :
                           type === 'inicio_inicio' ? 'SS' :
                           type === 'fim_fim' ? 'FF' :
                           type === 'inicio_fim' ? 'SF' : type
 
-    // Calcular X inicial e final baseado no tipo
-    // ONDA 3: Usar data efetiva de fim (última alocação se fragmentada)
     const fromStartX = getDateX(fromTask.start_date, fromTask)
-    const fromEffectiveEndDate = getEffectiveEndDate(fromTask)
-    const fromEndX = getDateX(fromEffectiveEndDate, fromTask)
-
-    const toStartX = getDateX(toTask.start_date, toTask)
-    const toEffectiveEndDate = getEffectiveEndDate(toTask)
-    const toEndX = getDateX(toEffectiveEndDate, toTask)
+    const fromEndX   = getTaskBarEndX(fromTask)
+    const toStartX   = getDateX(toTask.start_date, toTask)
+    const toEndX     = getTaskBarEndX(toTask)
 
     const startX = (normalizedType === 'SS' || normalizedType === 'SF') ? fromStartX : fromEndX
-    const endX = (normalizedType === 'FF' || normalizedType === 'SF') ? toEndX : toStartX
+    const endX   = (normalizedType === 'FF' || normalizedType === 'SF') ? toEndX     : toStartX
 
     const startY = getTaskY(fromTask.id)
-    const endY = getTaskY(toTask.id)
+    const endY   = getTaskY(toTask.id)
 
-    // Linha reta com ângulos retos (formato de escada)
-    const midX = (startX + endX) / 2
+    // Gap mínimo de folga entre segmentos horizontais e barras
+    const gap = 8
+    // Metade da altura real da barra (40px fixo)
+    const barHalf = 20
+
+    // Se há um trunkX fornecido (modo fishbone), usar roteamento de haste
+    if (trunkX !== null) {
+      // Haste: startX → trunkX (horizontal na altura da origem) já foi desenhada no tronco
+      // Aqui desenhamos apenas: trunkX → desce/sobe até endY → endX
+      if (Math.abs(startY - endY) < 2) {
+        // Mesma linha — haste direta
+        return `M ${startX} ${startY} L ${endX} ${endY}`
+      }
+      return `M ${trunkX} ${startY} L ${trunkX} ${endY} L ${endX} ${endY}`
+    }
+
+    // CASO NORMAL: há espaço horizontal suficiente entre saída e entrada
+    if (endX >= startX + gap) {
+      const cornerX = endX - gap
+      if (Math.abs(startY - endY) < 2) {
+        return `M ${startX} ${startY} L ${endX} ${endY}`
+      }
+      return `M ${startX} ${startY} L ${cornerX} ${startY} L ${cornerX} ${endY} L ${endX} ${endY}`
+    }
+
+    // CASO CROWDED: destino começa antes ou muito próximo do fim do predecessor
+    const stubX = startX + gap
+    let routeY: number
+    if (endY > startY) {
+      routeY = startY + barHalf + gap
+    } else {
+      routeY = startY - barHalf - gap
+    }
+    const entryX = endX - gap
 
     return `
       M ${startX} ${startY}
-      L ${midX} ${startY}
-      L ${midX} ${endY}
+      L ${stubX} ${startY}
+      L ${stubX} ${routeY}
+      L ${entryX} ${routeY}
+      L ${entryX} ${endY}
       L ${endX} ${endY}
     `
   }
 
   // Renderizar linhas
-  const linesToRender = predecessors
+  // Primeiro, coletar dados básicos de cada linha válida
+  const rawLines = predecessors
     .map(pred => {
       const fromTask = tasks.find(t => t.id === pred.predecessor_id)
       const toTask = tasks.find(t => t.id === pred.task_id)
@@ -319,20 +359,108 @@ export function PredecessorLines({
       if (!fromTask || !toTask) return null
       if (!taskPositionMap.has(fromTask.id) || !taskPositionMap.has(toTask.id)) return null
 
-      // Verificar se há conflito
+      const normalizedType = pred.type === 'fim_inicio' ? 'FS' :
+                             pred.type === 'inicio_inicio' ? 'SS' :
+                             pred.type === 'fim_fim' ? 'FF' :
+                             pred.type === 'inicio_fim' ? 'SF' : pred.type
+
+      // startX depende do tipo
+      const startX = (normalizedType === 'SS' || normalizedType === 'SF')
+        ? getDateX(fromTask.start_date, fromTask)
+        : getTaskBarEndX(fromTask)
+
       const hasConflictFlag = hasConflict(fromTask, toTask, pred.type)
 
-      return {
-        pred,
-        fromTask,
-        toTask,
-        path: generatePath(fromTask, toTask, pred.type),
-        color: hasConflictFlag ? '#EF4444' : getPredecessorColor(pred.type), // Vermelho se conflito
-        label: getShortLabel(pred.type),
-        hasConflict: hasConflictFlag
-      }
+      return { pred, fromTask, toTask, normalizedType, startX, hasConflictFlag }
     })
-    .filter(Boolean)
+    .filter(Boolean) as Array<{
+      pred: Predecessor
+      fromTask: TaskWithDates
+      toTask: TaskWithDates
+      normalizedType: string
+      startX: number
+      hasConflictFlag: boolean
+    }>
+
+  // Agrupar linhas por (fromTask.id + normalizedType) — mesmo ponto de saída
+  // Grupos com 2+ membros usam roteamento fishbone (tronco compartilhado + hastes)
+  const groups = new Map<string, typeof rawLines>()
+  for (const item of rawLines) {
+    const key = `${item.fromTask.id}_${item.normalizedType}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(item)
+  }
+
+  // Para cada grupo, calcular o trunkX = mínimo dos endX do grupo - gap
+  // (posiciona o tronco logo antes da barra mais à esquerda dos destinos)
+  const linesToRender = rawLines.map(item => {
+    const key = `${item.fromTask.id}_${item.normalizedType}`
+    const group = groups.get(key)!
+    const isGroup = group.length > 1
+
+    let path: string
+    let trunkPath: string | null = null
+
+    if (isGroup) {
+      // Calcular trunkX: fixo à esquerda de todos os destinos do grupo
+      const gap = 8
+      const endXValues = group.map(g => {
+        const normalizedType = g.normalizedType
+        return (normalizedType === 'FF' || normalizedType === 'SF')
+          ? getTaskBarEndX(g.toTask)
+          : getDateX(g.toTask.start_date, g.toTask)
+      })
+      const minEndX = Math.min(...endXValues)
+      const trunkX = Math.min(item.startX + gap, minEndX - gap)
+
+      const startY = getTaskY(item.fromTask.id)
+      const endY   = getTaskY(item.toTask.id)
+      const endX   = (item.normalizedType === 'FF' || item.normalizedType === 'SF')
+        ? getTaskBarEndX(item.toTask)
+        : getDateX(item.toTask.start_date, item.toTask)
+
+      // Tronco vertical: apenas a primeira linha do grupo o desenha
+      const isFirst = group[0] === item
+      if (isFirst) {
+        // Tronco vai desde startY até o endY mais extremo do grupo
+        const allEndYs = group.map(g => getTaskY(g.toTask.id))
+        const trunkStartY = startY
+        const trunkEndY = endY > startY
+          ? Math.max(...allEndYs)
+          : Math.min(...allEndYs)
+        // Linha horizontal de saída + tronco vertical
+        trunkPath = `M ${item.startX} ${trunkStartY} L ${trunkX} ${trunkStartY} L ${trunkX} ${trunkEndY}`
+      }
+
+      // Haste individual: trunkX → endY → endX
+      if (Math.abs(startY - endY) < 2) {
+        path = `M ${trunkX} ${endY} L ${endX} ${endY}`
+      } else {
+        path = `M ${trunkX} ${endY} L ${endX} ${endY}`
+      }
+    } else {
+      path = generatePath(item.fromTask, item.toTask, item.pred.type, null)
+    }
+
+    const endX = (item.normalizedType === 'FF' || item.normalizedType === 'SF')
+      ? getTaskBarEndX(item.toTask)
+      : getDateX(item.toTask.start_date, item.toTask)
+    const endY = getTaskY(item.toTask.id)
+
+    return {
+      pred: item.pred,
+      fromTask: item.fromTask,
+      toTask: item.toTask,
+      path,
+      trunkPath,
+      groupKey: key,
+      endX,
+      endY,
+      color: item.hasConflictFlag ? '#EF4444' : getPredecessorColor(item.pred.type),
+      label: getShortLabel(item.pred.type),
+      hasConflict: item.hasConflictFlag
+    }
+  })
 
   if (linesToRender.length === 0) {
     return null
@@ -399,7 +527,8 @@ export function PredecessorLines({
       {linesToRender.map(line => {
         if (!line) return null
 
-        const isHovered = hoveredLine === line.pred.id
+        // Uma linha está "hovered" se ela própria ou seu grupo está em hover
+        const isHovered = hoveredLine === line.pred.id || hoveredGroup === line.groupKey
 
         const markerColor = line.color === '#3B82F6' ? 'blue' :
                            line.color === '#10B981' ? 'green' :
@@ -408,49 +537,45 @@ export function PredecessorLines({
         const fromY = getTaskY(line.fromTask.id)
         const toY = getTaskY(line.toTask.id)
         const fromStartX = getDateX(line.fromTask.start_date, line.fromTask)
-        const fromEndX = getDateX(getEffectiveEndDate(line.fromTask), line.fromTask)
         const toStartX = getDateX(line.toTask.start_date, line.toTask)
-        const toEndX = getDateX(getEffectiveEndDate(line.toTask), line.toTask)
+
+        // Badge fica ao lado da seta: logo após o ponto de chegada no destino
+        const badgeX = line.endX + 18
+        const badgeY = line.endY
+
+        // Hover na haste/badge: destaca apenas esta linha
+        const enterLine = () => setHoveredLine(line.pred.id)
+        const leaveLine = () => setHoveredLine(null)
 
         return (
           <g key={line.pred.id}>
-            {/* Highlights das tarefas quando hover */}
-            {isHovered && (
+
+            {/* Tronco compartilhado (fishbone) — apenas a primeira linha do grupo o renderiza */}
+            {line.trunkPath && (
               <>
-                {/* Highlight da tarefa FROM */}
-                <rect
-                  x={fromStartX}
-                  y={fromY - rowHeight / 2}
-                  width={fromEndX - fromStartX}
-                  height={rowHeight}
-                  fill={line.color}
-                  opacity="0.15"
+                <path
+                  d={line.trunkPath}
+                  stroke={line.color}
+                  strokeWidth={line.hasConflict ? "3" : (hoveredGroup === line.groupKey ? "3" : "2")}
+                  strokeDasharray={line.hasConflict ? "5,5" : "none"}
+                  fill="none"
                   className="pointer-events-none"
+                  style={{ opacity: hoveredGroup === line.groupKey ? 1 : (line.hasConflict ? 0.9 : 0.8) }}
                 />
-                {/* Highlight da tarefa TO */}
-                <rect
-                  x={toStartX}
-                  y={toY - rowHeight / 2}
-                  width={toEndX - toStartX}
-                  height={rowHeight}
-                  fill={line.color}
-                  opacity="0.15"
-                  className="pointer-events-none"
+                {/* Área interativa sobre o tronco */}
+                <path
+                  d={line.trunkPath}
+                  stroke="transparent"
+                  strokeWidth="12"
+                  fill="none"
+                  className={editingMode ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}
+                  onMouseEnter={editingMode ? () => setHoveredGroup(line.groupKey) : undefined}
+                  onMouseLeave={editingMode ? () => setHoveredGroup(null) : undefined}
                 />
               </>
             )}
 
-            {/* Sombra da linha (outline branco para contraste) - ONDA 5.7 */}
-            <path
-              d={line.path}
-              stroke="white"
-              strokeWidth={line.hasConflict ? "5" : (isHovered ? "5" : "4")}
-              fill="none"
-              className="transition-all duration-200 pointer-events-none"
-              style={{ opacity: 0.9 }}
-            />
-
-            {/* Linha principal */}
+            {/* Haste/Linha principal */}
             <path
               d={line.path}
               stroke={line.color}
@@ -462,15 +587,15 @@ export function PredecessorLines({
               style={{ opacity: isHovered ? 1 : (line.hasConflict ? 0.9 : 0.8) }}
             />
 
-            {/* Área interativa invisível */}
+            {/* Área interativa invisível sobre a haste */}
             <path
               d={line.path}
               stroke="transparent"
               strokeWidth="12"
               fill="none"
               className={editingMode ? "pointer-events-auto cursor-pointer hover:stroke-gray-200" : "pointer-events-none"}
-              onMouseEnter={editingMode ? () => setHoveredLine(line.pred.id) : undefined}
-              onMouseLeave={editingMode ? () => setHoveredLine(null) : undefined}
+              onMouseEnter={editingMode ? enterLine : undefined}
+              onMouseLeave={editingMode ? leaveLine : undefined}
               onClick={editingMode ? (e) => {
                 e.stopPropagation()
                 onPredecessorClick?.(line.pred, line.fromTask, line.toTask)
@@ -479,12 +604,12 @@ export function PredecessorLines({
               {editingMode && <title>{`Clique para editar: ${line.fromTask.name} → ${line.toTask.name}`}</title>}
             </path>
 
-            {/* Badge no meio da linha — posicionado no segmento vertical da escada */}
+            {/* Badge ao lado da seta (junto ao destino) */}
             <g
-              transform={`translate(${(fromEndX + toStartX) / 2}, ${(fromY + toY) / 2})`}
+              transform={`translate(${badgeX}, ${badgeY})`}
               className={editingMode ? "pointer-events-auto cursor-pointer" : "pointer-events-none"}
-              onMouseEnter={editingMode ? () => setHoveredLine(line.pred.id) : undefined}
-              onMouseLeave={editingMode ? () => setHoveredLine(null) : undefined}
+              onMouseEnter={editingMode ? enterLine : undefined}
+              onMouseLeave={editingMode ? leaveLine : undefined}
               onClick={editingMode ? (e) => {
                 e.stopPropagation()
                 onPredecessorClick?.(line.pred, line.fromTask, line.toTask)

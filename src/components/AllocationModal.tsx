@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Resource, Task } from '@/types/database.types'
 import { Allocation, PRIORITY_CONFIG } from '@/types/allocation.types'
@@ -46,7 +46,12 @@ export default function AllocationModal({
   const [conflicts, setConflicts] = useState<ResourceConflict[]>([])
   const [showConflictWarning, setShowConflictWarning] = useState(false)
   const [allowOverride, setAllowOverride] = useState(false)
-  const [conflictingPriorities, setConflictingPriorities] = useState<string[]>([])
+
+  // Conflitos de alocação global (entre projetos)
+  const [allocationConflicts, setAllocationConflicts] = useState<ResourceConflict[]>([])
+  const [isCheckingConflicts, setIsCheckingConflicts] = useState(false)
+  // 'block' = existente é exclusivo (bloqueia), 'warn' = existente é compartilhado (avisa), 'none' = sem conflito
+  const [conflictLevel, setConflictLevel] = useState<'block' | 'warn' | 'none'>('none')
 
   // ONDA 3: Alocação parcial
   const [allocationType, setAllocationType] = useState<'full' | 'partial'>('full')
@@ -80,7 +85,14 @@ export default function AllocationModal({
 
   // 🌊 ONDA 5: Estado do Planner
   const [showPlanner, setShowPlanner] = useState(false)
+  // Ref para evitar que o useEffect de conflitos abra o Planner quando openPlannerForEdit já o fez
+  const plannerOpenedByEditRef = useRef(false)
   const [existingFragmentsForEdit, setExistingFragmentsForEdit] = useState<AllocationFragment[]>([])
+  // Fragmentos confirmados no Planner — aguardando confirmação final no modal principal
+  const [plannedFragments, setPlannedFragments] = useState<AllocationFragment[] | null>(null)
+  // Substituição parcial: dias com conflito (date → nome do recurso bloqueante) e substitutos disponíveis
+  const [conflictedDays, setConflictedDays] = useState<Record<string, string>>({})
+  const [substituteResources, setSubstituteResources] = useState<Array<{id: string; name: string; hierarchy: string; role: string | null; daily_capacity_minutes: number; hourly_rate: number}>>([])
 
   // Filter allocations for this specific task
   const existingAllocations = allAllocations.filter(a => a.task_id === task.id)
@@ -119,207 +131,296 @@ export default function AllocationModal({
 
   /**
    * 🌊 ONDA 5.2: Abrir Planner em modo de edição
+   * Detecta conflitos antes de abrir para garantir que isConflicted/substitutos sejam carregados
    */
-  function openPlannerForEdit(resourceId: string) {
+  async function openPlannerForEdit(resourceId: string) {
     const selectedResource = allResources.find(r => r.id === resourceId)
-    if (!selectedResource) {
-      return
-    }
+    if (!selectedResource || !task.start_date) return
 
-    // Buscar TODOS os fragmentos deste recurso nesta tarefa
-    const resourceFragments = existingAllocations
+    // Fragmentos do recurso principal
+    const mainFragments = existingAllocations
       .filter(a => a.resource_id === resourceId)
-      .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())
+      .sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime())
       .map(a => ({
-        start_date: a.start_date,
-        end_date: a.end_date,
+        start_date: a.start_date || '',
+        end_date: a.end_date || '',
         allocated_minutes: a.allocated_minutes ?? 0,
         overtime_minutes: a.overtime_minutes || 0,
-        overtime_multiplier: a.overtime_multiplier || 1.0
+        overtime_multiplier: a.overtime_multiplier || 1.0,
       }))
 
+    // Fragmentos de substitutos: alocações de outros recursos nesta tarefa
+    const substituteFragments = existingAllocations
+      .filter(a => a.resource_id !== resourceId)
+      .sort((a, b) => new Date(a.start_date || '').getTime() - new Date(b.start_date || '').getTime())
+      .map(a => ({
+        start_date: a.start_date || '',
+        end_date: a.end_date || '',
+        allocated_minutes: a.allocated_minutes ?? 0,
+        overtime_minutes: a.overtime_minutes || 0,
+        overtime_multiplier: a.overtime_multiplier || 1.0,
+        resource_id: a.resource_id,
+        resource_name: allResources.find(r => r.id === a.resource_id)?.name,
+      }))
+
+    const allFragments = [...mainFragments, ...substituteFragments].sort(
+      (a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+    )
+
+    // Detectar conflitos para marcar dias corretamente no Planner
+    let editConflictedDays: Record<string, string> = {}
+    let editSubstituteResources: typeof substituteResources = []
+
+    try {
+      const { checkAllocationConflicts } = await import('@/lib/resource-service')
+      const foundConflicts = await checkAllocationConflicts(
+        resourceId,
+        task.start_date,
+        task.end_date || task.start_date
+      )
+
+      if (foundConflicts.length > 0) {
+        const { data: conflictingAllocs } = await supabase
+          .from('allocations')
+          .select('start_date, end_date, priority, task:tasks(name)')
+          .eq('resource_id', resourceId)
+          .eq('priority', 'alta')
+
+        const taskStart = new Date(task.start_date + 'T00:00:00')
+        const taskEnd = new Date((task.end_date || task.start_date) + 'T00:00:00')
+
+        if (conflictingAllocs) {
+          for (const alloc of conflictingAllocs) {
+            if (!alloc.start_date || !alloc.end_date) continue
+            const aStart = new Date(alloc.start_date + 'T00:00:00')
+            const aEnd = new Date(alloc.end_date + 'T00:00:00')
+            const overlapStart = aStart > taskStart ? aStart : taskStart
+            const overlapEnd = aEnd < taskEnd ? aEnd : taskEnd
+            const d = new Date(overlapStart)
+            while (d <= overlapEnd) {
+              editConflictedDays[d.toISOString().split('T')[0]] = (alloc.task as any)?.name || 'exclusivo'
+              d.setDate(d.getDate() + 1)
+            }
+          }
+        }
+
+        // Buscar substitutos da mesma equipe
+        if (Object.keys(editConflictedDays).length > 0) {
+          const leaderId = selectedResource.hierarchy === 'lider' ? selectedResource.id : selectedResource.leader_id
+          if (leaderId) {
+            const { data: teammates } = await supabase
+              .from('resources')
+              .select('*')
+              .eq('leader_id', leaderId)
+              .eq('is_active', true)
+              .neq('id', resourceId)
+            editSubstituteResources = teammates || []
+          }
+        }
+      }
+    } catch {
+      // Ignorar erros na detecção — abrir Planner mesmo assim
+    }
+
+    plannerOpenedByEditRef.current = true
+    setConflictedDays(editConflictedDays)
+    setSubstituteResources(editSubstituteResources)
+    setSelectedResourceId(resourceId)
     setSelectedResourceForModal(selectedResource)
-    setExistingFragmentsForEdit(resourceFragments)
+    setExistingFragmentsForEdit(allFragments)
     setPendingAllocation({
-      resourceId: resourceId,
+      resourceId,
       priority: existingAllocations.find(a => a.resource_id === resourceId)?.priority as 'alta' | 'media' | 'baixa' || 'media',
       allocationType: 'full',
       allocatedMinutes: task.duration_minutes || 0
     })
-
-    // Abrir Planner em modo de edição
     setShowPlanner(true)
   }
 
-  // ONDA 3: Detecção automática de overflow quando recurso é selecionado
+  // Verificação de conflitos globais + detecção de overflow (em sequência)
+  // O Planner só é aberto APÓS confirmar que não há conflito blocante
   useEffect(() => {
-    const detectOverflow = async () => {
-      // Só detectar para novas alocações (não em modo de edição)
-      if (!selectedResourceId || !task.start_date) {
-        return
+    if (!selectedResourceId || !task.start_date) {
+      setAllocationConflicts([])
+      setConflictLevel('none')
+      return
+    }
+
+    const selectedResource = allResources.find(r => r.id === selectedResourceId)
+    if (!selectedResource) return
+
+    const run = async () => {
+      // 1. Verificar conflitos globais primeiro
+      setIsCheckingConflicts(true)
+      let foundConflicts: import('@/lib/resource-service').ResourceConflict[] = []
+      let level: 'block' | 'warn' | 'none' = 'none'
+
+      try {
+        const { checkAllocationConflicts } = await import('@/lib/resource-service')
+        foundConflicts = await checkAllocationConflicts(
+          selectedResourceId,
+          task.start_date!,
+          task.end_date || task.start_date!
+        )
+        setAllocationConflicts(foundConflicts)
+
+        if (foundConflicts.length === 0) {
+          level = 'none'
+        } else {
+          const hasExclusive = foundConflicts.some(c => c.existingPriority === 'alta')
+          level = hasExclusive ? 'block' : 'warn'
+        }
+        // Nível provisório — pode ser rebaixado para 'warn' se o conflito for apenas parcial
+        setConflictLevel(level)
+      } catch {
+        setAllocationConflicts([])
+        setConflictLevel('none')
+      } finally {
+        setIsCheckingConflicts(false)
       }
 
-      const selectedResource = allResources.find(r => r.id === selectedResourceId)
-      if (!selectedResource) {
-        return
+      // 2. Se há conflito (block ou warn): calcular quais dias específicos estão bloqueados
+      let localConflictedDays: Record<string, string> = {}
+      if ((level === 'block' || level === 'warn') && foundConflicts.length > 0 && task.start_date) {
+        // Buscar alocações exclusivas reais do recurso neste período para obter datas exatas
+        const { data: conflictingAllocs } = await supabase
+          .from('allocations')
+          .select('start_date, end_date, priority, task:tasks(name)')
+          .eq('resource_id', selectedResourceId)
+          .eq('priority', 'alta')
+
+        const blockedExact: Record<string, string> = {}
+        const taskEndDate = task.end_date || task.start_date
+
+        if (conflictingAllocs) {
+          const taskStart = new Date(task.start_date + 'T00:00:00')
+          const taskEnd = new Date(taskEndDate + 'T00:00:00')
+          for (const alloc of conflictingAllocs) {
+            if (!alloc.start_date || !alloc.end_date) continue
+            const aStart = new Date(alloc.start_date + 'T00:00:00')
+            const aEnd = new Date(alloc.end_date + 'T00:00:00')
+            const overlapStart = aStart > taskStart ? aStart : taskStart
+            const overlapEnd = aEnd < taskEnd ? aEnd : taskEnd
+            const d = new Date(overlapStart)
+            while (d <= overlapEnd) {
+              const ds = d.toISOString().split('T')[0]
+              blockedExact[ds] = (alloc.task as any)?.name || 'exclusivo'
+              d.setDate(d.getDate() + 1)
+            }
+          }
+        }
+
+        // Contar quantos dias úteis a tarefa tem no total
+        const countBusinessDays = (start: string, end: string) => {
+          let count = 0
+          const cur = new Date(start + 'T00:00:00')
+          const endD = new Date(end + 'T00:00:00')
+          while (cur <= endD) {
+            const dow = cur.getDay()
+            if (dow !== 0 && dow !== 6) count++
+            cur.setDate(cur.getDate() + 1)
+          }
+          return count
+        }
+        const totalTaskDays = countBusinessDays(task.start_date, task.end_date || task.start_date)
+        const blockedCount = Object.keys(blockedExact).length
+
+        if (blockedCount > 0 && blockedCount < totalTaskDays) {
+          // Conflito PARCIAL: nem todos os dias estão bloqueados — rebaixar para 'warn' e mostrar Planner
+          level = 'warn'
+          setConflictLevel('warn')
+          setConflictedDays(blockedExact)
+          localConflictedDays = blockedExact
+        } else if (blockedCount >= totalTaskDays) {
+          // Todos os dias estão bloqueados — bloquear totalmente
+          setConflictedDays({})
+        } else {
+          // Nenhum dia exato encontrado (pode ser só o start_date do conflito sem range completo)
+          setConflictedDays({})
+        }
+
+        // Buscar substitutos: recursos da mesma equipe (mesmo leader_id) disponíveis
+        if (Object.keys(blockedExact).length > 0 && blockedExact && (selectedResource.leader_id || selectedResource.hierarchy === 'lider')) {
+          const leaderId = selectedResource.hierarchy === 'lider' ? selectedResource.id : selectedResource.leader_id
+          if (leaderId) {
+            const { data: teammates } = await supabase
+              .from('resources')
+              .select('*')
+              .eq('leader_id', leaderId)
+              .eq('is_active', true)
+              .neq('id', selectedResourceId)
+            setSubstituteResources(teammates || [])
+          } else {
+            setSubstituteResources([])
+          }
+        } else {
+          setSubstituteResources([])
+        }
+      } else {
+        setConflictedDays({})
+        setSubstituteResources([])
       }
 
-      // Minutos que queremos alocar
+      // 3. Se ainda é 'block' (todos os dias bloqueados), não abrir Planner
+      if (level === 'block') return
+
+      // 4. Calcular overflow/plano multi-dia e abrir Planner se necessário
       const minutesToAllocate = allocationType === 'partial' ? allocatedMinutes : task.duration_minutes || 0
 
-      // Buscar alocações existentes do recurso no mesmo dia (start_date)
-      const existingAllocationsOnDate = allAllocations.filter(a =>
-        a.resource_id === selectedResourceId &&
-        a.start_date === task.start_date &&
-        a.task_id !== task.id
-      )
-
-      // Calcular total de minutos já alocados neste dia
-      // IMPORTANTE: Se allocated_minutes é NULL, buscar duration_minutes da tarefa
-      let existingMinutesOnDate = 0
-
-      for (const alloc of existingAllocationsOnDate) {
-        if (alloc.allocated_minutes !== null && alloc.allocated_minutes !== undefined) {
-          // Tem valor explícito
-          existingMinutesOnDate += alloc.allocated_minutes
-        } else {
-          // NULL = 100% da tarefa, buscar duration_minutes
-          const { data: taskData, error } = await supabase
-            .from('tasks')
-            .select('duration_minutes')
-            .eq('id', alloc.task_id)
-            .single()
-
-          if (error) {
-            continue
-          }
-
-          const minutes = taskData?.duration_minutes || 0
-          existingMinutesOnDate += minutes
-        }
-      }
-
-      // ONDA 3.5: Calcular plano multi-dia RECURSIVO
-      // Criar mapa de alocações existentes por data
       const existingAllocationsByDate: Record<string, number> = {}
       const allResourceAllocations = allAllocations.filter(a => a.resource_id === selectedResourceId)
 
       for (const alloc of allResourceAllocations) {
         const dateKey = alloc.start_date
-        if (!existingAllocationsByDate[dateKey]) {
-          existingAllocationsByDate[dateKey] = 0
-        }
+        if (!dateKey) continue
+        if (!existingAllocationsByDate[dateKey]) existingAllocationsByDate[dateKey] = 0
 
         if (alloc.allocated_minutes !== null && alloc.allocated_minutes !== undefined) {
           existingAllocationsByDate[dateKey] += alloc.allocated_minutes
         } else {
-          // NULL = 100% da tarefa
           const { data: taskData } = await supabase
             .from('tasks')
             .select('duration_minutes')
             .eq('id', alloc.task_id)
             .single()
-
           existingAllocationsByDate[dateKey] += taskData?.duration_minutes || 0
         }
       }
 
-      // Calcular plano multi-dia
       const plan = calculateMultiDayAllocationPlan(
         minutesToAllocate,
         selectedResource,
-        task.start_date,
+        task.start_date!,
         existingAllocationsByDate,
-        false // Não usar hora extra automaticamente - perguntar ao usuário
+        false
       )
 
-      // 🌊 ONDA 5: Abrir Planner para TODOS os casos multi-dia
-      // (Substitui os modais de Weekend e MultiDay)
-      if (plan.days.length > 1 || plan.requiresWeekendDecision || plan.requiresUserDecision) {
-        // Guardar informações da alocação pendente
-        setPendingAllocation({
-          resourceId: selectedResourceId,
-          priority: priority,
-          allocationType: allocationType,
-          allocatedMinutes: allocatedMinutes
-        })
-
-        setSelectedResourceForModal(selectedResource)
-        setMultiDayPlan(plan)
-        setShowPlanner(true)
-
+      // Se o Planner já foi aberto por openPlannerForEdit, não abrir novamente
+      if (plannerOpenedByEditRef.current) {
+        plannerOpenedByEditRef.current = false
         return
       }
 
-      // 🌊 ONDA 5: Modais antigos DESATIVADOS (mantidos para possível reativação)
-      /*
-      // 🌊 ONDA 4.3: PRIORIDADE CRONOLÓGICA - Verificar fins de semana PRIMEIRO
-      if (plan.requiresWeekendDecision && plan.weekendsDetected > 0) {
-        // Guardar informações da alocação pendente
+      // Em modo de edição (allocationId), só atualizar conflictedDays/substituteResources
+      if (allocationId) return
+
+      // Abrir Planner se: multi-dia, fim de semana, overflow, ou há dias conflitados para substituição
+      const hasConflictedDaysNow = level === 'warn' && Object.keys(localConflictedDays).length > 0
+
+      if (plan.days.length > 1 || plan.requiresWeekendDecision || plan.requiresUserDecision || hasConflictedDaysNow) {
         setPendingAllocation({
           resourceId: selectedResourceId,
           priority: priority,
           allocationType: allocationType,
           allocatedMinutes: allocatedMinutes
         })
-
         setSelectedResourceForModal(selectedResource)
         setMultiDayPlan(plan)
-
-        // Extrair fins de semana do plano para o modal
-        const weekends: WeekendDay[] = []
-        let remainingMinutes = minutesToAllocate
-
-        // Simular distribuição cronológica para saber quantos minutos restam em cada fim de semana
-        const dailyCapacity = selectedResource.daily_capacity_minutes || 540
-        const planDate = new Date(task.start_date + 'T00:00:00')
-
-        while (remainingMinutes > 0) {
-          const dateStr = planDate.toISOString().split('T')[0]
-          const dayOfWeek = planDate.getDay() // 0 = domingo, 6 = sábado
-
-          if (dayOfWeek === 0 || dayOfWeek === 6) {
-            // É fim de semana
-            weekends.push({
-              date: dateStr,
-              dayOfWeek: dayOfWeek === 6 ? 'Sábado' : 'Domingo',
-              remainingMinutes
-            })
-          } else {
-            // Dia útil - consumir capacidade
-            remainingMinutes -= Math.min(remainingMinutes, dailyCapacity)
-          }
-
-          planDate.setDate(planDate.getDate() + 1)
-
-          // Segurança
-          if (weekends.length > 10) break
-        }
-
-        setWeekendDays(weekends)
-        setShowWeekendModal(true)
-
-        return // Parar aqui - modal de overflow só abre depois
+        setShowPlanner(true)
       }
-
-      // Se o plano requer decisão do usuário (tem dias com overflow), abrir modal multi-dia
-      if (plan.requiresUserDecision) {
-        // Guardar informações da alocação pendente
-        setPendingAllocation({
-          resourceId: selectedResourceId,
-          priority: priority,
-          allocationType: allocationType,
-          allocatedMinutes: allocatedMinutes
-        })
-
-        setSelectedResourceForModal(selectedResource)
-        setMultiDayPlan(plan)
-        setShowMultiDayModal(true)
-      }
-      */
     }
 
-    detectOverflow()
+    run()
   }, [selectedResourceId, allocationType, allocatedMinutes, allocationId, allResources, allAllocations, task, priority])
 
   async function handleAllocate() {
@@ -356,20 +457,43 @@ export default function AllocationModal({
         // Só bloquear se houver eventos pessoais bloqueantes (férias, folga, etc)
         if (personalEventConflicts.length > 0) {
           setConflicts(personalEventConflicts)
-          setConflictingPriorities([])
           setShowConflictWarning(true)
           setAllowOverride(false)  // Não permitir override de eventos pessoais
           setIsSaving(false)
           return
         }
 
-        // Conflitos de alocação (allocation_overlap) agora são ignorados aqui
-        // O sistema de overflow cuida disso baseado em capacidade real
+        // Verificação de conflitos de alocação baseada em dedicação (priority)
+        // Se há conflitos de sobreposição de alocação:
+        if (allocationConflicts.length > 0) {
+          // Se alguma alocação existente é 'exclusiva' (alta) → bloquear
+          if (conflictLevel === 'block') {
+            setConflicts(allocationConflicts)
+            setShowConflictWarning(true)
+            setAllowOverride(false)
+            setIsSaving(false)
+            return
+          }
+
+          // Se a alocação que estamos criando é 'exclusiva' (alta) → bloquear também
+          if (priority === 'alta') {
+            setConflicts(allocationConflicts)
+            setShowConflictWarning(true)
+            setAllowOverride(true) // Permitir override mudando para compartilhado
+            setIsSaving(false)
+            return
+          }
+
+          // Se conflictLevel === 'warn' e a nova alocação não é exclusiva → só avisa, não bloqueia
+          // (continua para o INSERT)
+        }
       }
 
-      // ONDA 3: UPDATE se estiver editando, INSERT se for nova alocação
-      let error
-      if (allocationId) {
+      // Salvar — com fragmentos do Planner ou INSERT simples
+      if (plannedFragments && plannedFragments.length > 0) {
+        // Fluxo com Planner: salvar todos os fragmentos usando a dedicação escolhida no modal
+        await savePlannerFragments(plannedFragments, selectedResourceId, priority)
+      } else if (allocationId) {
         // Modo de edição: UPDATE
         const { error: updateError } = await supabase
           .from('allocations')
@@ -380,10 +504,9 @@ export default function AllocationModal({
             overtime_multiplier: hasOvertime ? overtimeMultiplier : 1.5
           })
           .eq('id', allocationId)
-
-        error = updateError
+        if (updateError) throw updateError
       } else {
-        // Modo de criação: INSERT
+        // INSERT simples (tarefa de 1 dia, sem Planner)
         const { error: insertError } = await supabase
           .from('allocations')
           .insert({
@@ -396,11 +519,8 @@ export default function AllocationModal({
             overtime_minutes: hasOvertime ? overtimeMinutes : 0,
             overtime_multiplier: hasOvertime ? overtimeMultiplier : 1.5
           })
-
-        error = insertError
+        if (insertError) throw insertError
       }
-
-      if (error) throw error
 
       // Atualizar custo real da tarefa
       await updateTaskActualCost(task.id)
@@ -412,6 +532,9 @@ export default function AllocationModal({
       setPriority('media')
       setConflicts([])
       setShowConflictWarning(false)
+      setPlannedFragments(null)
+      setPendingAllocation(null)
+      setSelectedResourceForModal(null)
 
       // Refresh global allocations
       await refreshAllocations()
@@ -421,55 +544,6 @@ export default function AllocationModal({
         dispatchToast('Esta pessoa já está alocada nesta tarefa', 'info')
       } else {
         logError(error, 'handleAllocate')
-        showErrorAlert(error, ErrorContext.ALLOCATION_CREATE)
-      }
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  async function handleForceAllocate() {
-    // Force allocation even with conflicts (only for allocation overlaps)
-    setIsSaving(true)
-
-    try {
-      // ONDA 3: Include allocated_minutes + overtime_minutes + overtime_multiplier
-      const { error } = await supabase
-        .from('allocations')
-        .insert({
-          resource_id: selectedResourceId,
-          task_id: task.id,
-          priority: priority,
-          start_date: task.start_date,
-          end_date: task.end_date,
-          allocated_minutes: allocationType === 'partial' ? allocatedMinutes : null,
-          overtime_minutes: hasOvertime ? overtimeMinutes : 0,
-          overtime_multiplier: hasOvertime ? overtimeMultiplier : 1.5
-        })
-
-      if (error) throw error
-
-      // Atualizar custo real da tarefa
-      await updateTaskActualCost(task.id)
-
-      showSuccessAlert('Recurso alocado com prioridade diferenciada!')
-
-      // Reset form
-      setSelectedResourceId('')
-      setPriority('media')
-      setConflicts([])
-      setConflictingPriorities([])
-      setShowConflictWarning(false)
-      setAllowOverride(false)
-
-      // Refresh global allocations
-      await refreshAllocations()
-      onSuccess()
-    } catch (error: any) {
-      if (error.code === '23505') {
-        dispatchToast('Esta pessoa já está alocada nesta tarefa', 'info')
-      } else {
-        logError(error, 'handleForceAllocate')
         showErrorAlert(error, ErrorContext.ALLOCATION_CREATE)
       }
     } finally {
@@ -872,102 +946,66 @@ export default function AllocationModal({
   }
 
   /**
-   * 🌊 ONDA 5: Processar fragmentos do Planner
+   * 🌊 ONDA 5: Confirmar plano no Planner — guarda fragmentos e volta para o modal principal
+   * O salvamento final só acontece quando o usuário clicar em "Alocar Pessoa"
    */
-  async function handlePlannerConfirm(fragments: AllocationFragment[]) {
-    if (!pendingAllocation || !selectedResourceForModal) {
-      return
+  function handlePlannerConfirm(fragments: AllocationFragment[]) {
+    setPlannedFragments(fragments)
+    setShowPlanner(false)
+    // Não limpar selectedResourceForModal nem pendingAllocation — ainda serão usados no handleAllocate
+  }
+
+  /**
+   * 🌊 ONDA 5: Salvar fragmentos no banco (chamado por handleAllocate quando plannedFragments existe)
+   */
+  async function savePlannerFragments(
+    fragments: AllocationFragment[],
+    resourceId: string,
+    dedicacao: 'alta' | 'media' | 'baixa'
+  ) {
+    // MODO DE EDIÇÃO: deletar alocações existentes deste recurso nesta tarefa
+    const existingResourceAllocations = existingAllocations.filter(a => a.resource_id === resourceId)
+    if (existingResourceAllocations.length > 0) {
+      const { error: deleteError } = await supabase
+        .from('allocations')
+        .delete()
+        .eq('task_id', task.id)
+        .eq('resource_id', resourceId)
+      if (deleteError) throw deleteError
     }
 
-    setShowPlanner(false)
-    setIsSaving(true)
+    // Criar alocações para cada fragmento
+    // Fragmentos com resource_id próprio são de substitutos — usar esse resource_id
+    const allocationsToCreate = fragments.map(fragment => ({
+      resource_id: fragment.resource_id || resourceId,  // Substituto ou recurso principal
+      task_id: task.id,
+      priority: dedicacao,
+      start_date: fragment.start_date,
+      end_date: fragment.end_date,
+      allocated_minutes: fragment.allocated_minutes,
+      // Hora extra: usa do fragmento se já veio do Planner, senão aplica a configuração do modal (só para o recurso principal)
+      overtime_minutes: fragment.overtime_minutes > 0
+        ? fragment.overtime_minutes
+        : (!fragment.resource_id && hasOvertime ? overtimeMinutes : 0),
+      overtime_multiplier: fragment.overtime_minutes > 0
+        ? fragment.overtime_multiplier
+        : (!fragment.resource_id && hasOvertime ? overtimeMultiplier : 1.0)
+    }))
 
-    try {
-      const { resourceId, priority } = pendingAllocation
+    const { error: insertError } = await supabase
+      .from('allocations')
+      .insert(allocationsToCreate)
+    if (insertError) throw insertError
 
-      // 🔄 MODO DE EDIÇÃO: Verificar se já existem alocações deste recurso
-      const existingResourceAllocations = existingAllocations.filter(a => a.resource_id === resourceId)
-      const isEditMode = existingResourceAllocations.length > 0
-
-      if (isEditMode) {
-        // Deletar TODAS as alocações deste recurso nesta tarefa
-        const { error: deleteError } = await supabase
-          .from('allocations')
-          .delete()
-          .eq('task_id', task.id)
-          .eq('resource_id', resourceId)
-
-        if (deleteError) {
-          throw deleteError
-        }
-      }
-
-      // Criar alocações para cada fragmento
-      const allocationsToCreate = fragments.map(fragment => ({
-        resource_id: resourceId,
-        task_id: task.id,
-        priority,
-        start_date: fragment.start_date,
-        end_date: fragment.end_date,
-        allocated_minutes: fragment.allocated_minutes,
-        overtime_minutes: fragment.overtime_minutes,
-        overtime_multiplier: fragment.overtime_multiplier
-      }))
-
-      // Inserir todas as alocações
-      const { error: insertError } = await supabase
-        .from('allocations')
-        .insert(allocationsToCreate)
-
-      if (insertError) {
-        throw insertError
-      }
-
-      // 🔄 Atualizar end_date da tarefa baseado no último fragmento de TODOS os recursos
-      // Buscar todas as alocações da tarefa (incluindo as que acabamos de inserir)
-      const { data: allTaskAllocations, error: fetchError } = await supabase
-        .from('allocations')
-        .select('end_date')
-        .eq('task_id', task.id)
-        .order('end_date', { ascending: false })
-        .limit(1)
-
-      if (fetchError) {
-        // error fetching allocations to update end_date
-      } else if (allTaskAllocations && allTaskAllocations.length > 0) {
-        const latestEndDate = allTaskAllocations[0].end_date
-
-        const { error: updateTaskError } = await supabase
-          .from('tasks')
-          .update({ end_date: latestEndDate })
-          .eq('id', task.id)
-
-        if (updateTaskError) {
-          // Não lançar erro, apenas registrar
-        }
-      }
-
-      // Atualizar custo real da tarefa
-      await updateTaskActualCost(task.id)
-
-      const message = isEditMode
-        ? `Alocação atualizada com sucesso (${fragments.length} fragmento(s))`
-        : `${fragments.length} alocação(ões) criada(s) com sucesso`
-
-      showSuccessAlert(message)
-
-      // Refresh
-      await refreshAllocations()
-      onSuccess()
-    } catch (error) {
-      logError(error as Error, ErrorContext.AllocationCreate)
-      showErrorAlert('Erro ao criar alocações')
-    } finally {
-      setIsSaving(false)
-      setPendingAllocation(null)
-      setMultiDayPlan(null)
-      setSelectedResourceForModal(null)
-      setExistingFragmentsForEdit([])
+    // Atualizar end_date da tarefa com o último fragmento
+    const sortedFragments = [...fragments].sort((a, b) =>
+      new Date(b.end_date).getTime() - new Date(a.end_date).getTime()
+    )
+    if (sortedFragments.length > 0) {
+      await supabase
+        .from('tasks')
+        .update({ end_date: sortedFragments[0].end_date })
+        .eq('id', task.id)
     }
   }
 
@@ -980,6 +1018,8 @@ export default function AllocationModal({
     setMultiDayPlan(null)
     setSelectedResourceForModal(null)
     setExistingFragmentsForEdit([])
+    setPlannedFragments(null)
+    setSelectedResourceId('')
     setIsSaving(false)
   }
 
@@ -1095,6 +1135,8 @@ export default function AllocationModal({
           onCancel={handlePlannerCancel}
           editMode={existingFragmentsForEdit.length > 0}
           existingFragments={existingFragmentsForEdit}
+          conflictedDays={conflictedDays}
+          substituteResources={substituteResources}
         />
       )}
 
@@ -1359,7 +1401,7 @@ export default function AllocationModal({
                         </label>
                         <select
                           value={selectedResourceId}
-                          onChange={(e) => setSelectedResourceId(e.target.value)}
+                          onChange={(e) => { setSelectedResourceId(e.target.value); setPlannedFragments(null) }}
                           disabled={!!allocationId}
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                         >
@@ -1421,7 +1463,7 @@ export default function AllocationModal({
                                     name="operator"
                                     value={operator.id}
                                     checked={selectedResourceId === operator.id}
-                                    onChange={(e) => setSelectedResourceId(e.target.value)}
+                                    onChange={(e) => { setSelectedResourceId(e.target.value); setPlannedFragments(null) }}
                                     disabled={!!allocationId}
                                     className="mr-3"
                                   />
@@ -1440,25 +1482,111 @@ export default function AllocationModal({
                 </div>
               )}
 
-              {/* Seleção de Prioridade */}
+              {/* Aviso de conflito de alocação global — aparece ao selecionar recurso */}
+              {selectedResourceId && allocationConflicts.length > 0 && (
+                <div className={`mt-4 p-4 rounded-lg border-2 ${
+                  conflictLevel === 'block'
+                    ? 'bg-red-50 border-red-300'
+                    : 'bg-yellow-50 border-yellow-300'
+                }`}>
+                  <div className="flex items-start gap-2">
+                    <span className="text-xl">{conflictLevel === 'block' ? '🔒' : '⚡'}</span>
+                    <div className="flex-1">
+                      <h5 className={`font-bold mb-1 ${conflictLevel === 'block' ? 'text-red-900' : 'text-yellow-900'}`}>
+                        {conflictLevel === 'block'
+                          ? 'Recurso exclusivo em outro projeto'
+                          : 'Recurso já alocado neste período'
+                        }
+                      </h5>
+                      <p className={`text-sm mb-2 ${conflictLevel === 'block' ? 'text-red-700' : 'text-yellow-800'}`}>
+                        {conflictLevel === 'block'
+                          ? 'Este recurso está marcado como Exclusivo em outra(s) tarefa(s) sobrepostas. Escolha outro recurso ou altere a dedicação da alocação existente.'
+                          : 'Este recurso possui alocações sobrepostas. Defina a Dedicação abaixo para controlar como o conflito é tratado.'
+                        }
+                      </p>
+                      <div className="space-y-1">
+                        {allocationConflicts.map((c, i) => (
+                          <div key={i} className={`text-xs px-2 py-1 rounded border ${
+                            conflictLevel === 'block' ? 'bg-red-100 border-red-200 text-red-800' : 'bg-yellow-100 border-yellow-200 text-yellow-800'
+                          }`}>
+                            <span className="font-medium">
+                              {PRIORITY_CONFIG[c.existingPriority || 'media'].icon} {PRIORITY_CONFIG[c.existingPriority || 'media'].label}
+                            </span>
+                            {' — '}{c.message}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Botão para planejar substituição quando há dias conflitados parcialmente */}
+                      {conflictLevel === 'warn' && Object.keys(conflictedDays).length > 0 && !isCheckingConflicts && (
+                        <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg">
+                          <p className="text-xs text-amber-900 mb-2 font-medium">
+                            📅 {Object.keys(conflictedDays).length} dia(s) com conflito detectado(s).
+                            Você pode alocar este recurso nos dias livres e escolher um substituto para os dias bloqueados.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const selectedResource = allResources.find(r => r.id === selectedResourceId)
+                              if (!selectedResource) return
+                              setPendingAllocation({
+                                resourceId: selectedResourceId,
+                                priority: priority,
+                                allocationType: allocationType,
+                                allocatedMinutes: allocationType === 'partial' ? allocatedMinutes : (task.duration_minutes || 0)
+                              })
+                              setSelectedResourceForModal(selectedResource)
+                              setShowPlanner(true)
+                            }}
+                            className="w-full px-3 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 transition-colors"
+                          >
+                            🗓️ Planejar distribuição por dias (com substituição)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Loading de verificação de conflitos */}
+              {selectedResourceId && isCheckingConflicts && (
+                <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
+                  <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+                  Verificando disponibilidade em todos os projetos...
+                </div>
+              )}
+
+              {/* Sem conflitos confirmado */}
+              {selectedResourceId && !isCheckingConflicts && allocationConflicts.length === 0 && task.start_date && task.end_date && !allocationId && (
+                <div className="mt-4 flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                  <span>✅</span>
+                  <span>Recurso disponível neste período (sem conflitos em outros projetos)</span>
+                </div>
+              )}
+
+              {/* Seleção de Dedicação (renomeado de Prioridade) */}
               {selectedResourceId && (
                 <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Prioridade da Tarefa
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Dedicação deste recurso
                   </label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Define se o recurso pode ser alocado em outras tarefas com datas sobrepostas
+                  </p>
                   <div className="grid grid-cols-3 gap-3">
                     {(['alta', 'media', 'baixa'] as const).map(p => (
                       <button
                         key={p}
                         onClick={() => setPriority(p)}
-                        className={`p-3 rounded-lg border-2 transition-all ${
+                        className={`p-3 rounded-lg border-2 transition-all text-left ${
                           priority === p
                             ? `${PRIORITY_CONFIG[p].color} border-current`
                             : 'border-gray-200 hover:border-gray-300 text-gray-700'
                         }`}
                       >
                         <div className="font-medium text-sm">
-                          {PRIORITY_CONFIG[p].label}
+                          {PRIORITY_CONFIG[p].icon} {PRIORITY_CONFIG[p].label}
                         </div>
                         <div className="text-xs mt-1 opacity-80">
                           {PRIORITY_CONFIG[p].description}
@@ -1497,7 +1625,23 @@ export default function AllocationModal({
 
                     <button
                       type="button"
-                      onClick={() => setAllocationType('partial')}
+                      onClick={() => {
+                        setAllocationType('partial')
+                        // Se há dias conflitados, abrir o Planner automaticamente ao selecionar "Parcial"
+                        if (conflictLevel === 'warn' && Object.keys(conflictedDays).length > 0) {
+                          const selectedResource = allResources.find(r => r.id === selectedResourceId)
+                          if (selectedResource) {
+                            setPendingAllocation({
+                              resourceId: selectedResourceId,
+                              priority: priority,
+                              allocationType: 'partial',
+                              allocatedMinutes: allocatedMinutes
+                            })
+                            setSelectedResourceForModal(selectedResource)
+                            setShowPlanner(true)
+                          }
+                        }
+                      }}
                       className={`p-4 border-2 rounded-lg text-left transition-all ${
                         allocationType === 'partial'
                           ? 'border-orange-600 bg-orange-50 shadow-md'
@@ -1508,6 +1652,9 @@ export default function AllocationModal({
                         allocationType === 'partial' ? 'text-orange-900' : 'text-gray-700'
                       }`}>
                         ⏱️ Parcial
+                        {conflictLevel === 'warn' && Object.keys(conflictedDays).length > 0 && (
+                          <span className="ml-1 text-xs text-amber-600 font-normal">(abre planejador)</span>
+                        )}
                       </div>
                       <div className="text-xs mt-1 text-gray-600">
                         Definir minutos específicos
@@ -1729,7 +1876,34 @@ export default function AllocationModal({
                 )
               })()}
 
-              {task.start_date && task.end_date && selectedResourceId && (
+              {/* Resumo do plano confirmado no Planner */}
+              {plannedFragments && plannedFragments.length > 0 ? (
+                <div className="mt-4 p-3 bg-green-50 border-2 border-green-300 rounded-lg text-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-green-900">✅ Plano confirmado ({plannedFragments.length} fragmento{plannedFragments.length > 1 ? 's' : ''})</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowPlanner(true)}
+                      className="text-xs text-green-700 underline hover:text-green-900"
+                    >
+                      Editar plano
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {plannedFragments.map((f, i) => (
+                      <div key={i} className="flex items-center gap-2 text-green-800">
+                        <span className="text-xs font-mono bg-green-100 px-1.5 py-0.5 rounded">
+                          {f.start_date === f.end_date ? f.start_date : `${f.start_date} → ${f.end_date}`}
+                        </span>
+                        <span className="text-xs">{formatMinutes(f.allocated_minutes)}</span>
+                        {f.overtime_minutes > 0 && (
+                          <span className="text-xs text-orange-700">+ {formatMinutes(f.overtime_minutes)} extra</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : task.start_date && task.end_date && selectedResourceId && (
                 <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
                   ℹ️ Esta alocação usará as datas da tarefa:
                   <div className="mt-1">
@@ -1739,26 +1913,38 @@ export default function AllocationModal({
                 </div>
               )}
 
-              {/* ✅ Conflict Warning */}
+              {/* ✅ Conflict Warning — eventos pessoais bloqueantes ou alocação exclusiva */}
               {showConflictWarning && conflicts.length > 0 && (
                 <div className="mt-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
                   <div className="flex items-start gap-2 mb-2">
-                    <span className="text-red-600 text-xl">⚠️</span>
+                    <span className="text-red-600 text-xl">🚫</span>
                     <div className="flex-1">
                       <h5 className="font-bold text-red-900 mb-1">
-                        {allowOverride ? 'Conflito Detectado - Priorização Necessária' : 'Conflito Detectado - Não foi possível alocar'}
+                        {allowOverride
+                          ? 'Conflito de Dedicação — Escolha outro nível'
+                          : conflicts[0]?.type === 'personal_event_block'
+                          ? 'Recurso indisponível — Evento pessoal bloqueante'
+                          : 'Recurso Exclusivo em outro projeto'
+                        }
                       </h5>
                       <p className="text-sm text-red-800 mb-3">
                         {allowOverride
-                          ? 'Este recurso já está alocado em outra(s) tarefa(s) no mesmo período:'
-                          : 'Este recurso não está disponível no período da tarefa:'
+                          ? 'Você está tentando alocar como Exclusivo, mas este recurso já possui alocações sobrepostas. Mude a Dedicação para "Compartilhado" ou "Flexível" para prosseguir.'
+                          : conflicts[0]?.type === 'personal_event_block'
+                          ? 'O recurso possui um evento pessoal que bloqueia trabalho neste período:'
+                          : 'Este recurso está marcado como Exclusivo em outra(s) tarefa(s) sobrepostas. Não é possível alocar.'
                         }
                       </p>
                       <div className="space-y-2">
                         {conflicts.map((conflict, idx) => (
                           <div key={idx} className="bg-white p-2 rounded border border-red-200 text-sm text-red-900">
                             <div className="font-medium">
-                              {conflict.type === 'allocation_overlap' && '📊 Já alocado em outra tarefa'}
+                              {conflict.type === 'allocation_overlap' && (
+                                <span>
+                                  {PRIORITY_CONFIG[conflict.existingPriority || 'media'].icon}{' '}
+                                  {PRIORITY_CONFIG[conflict.existingPriority || 'media'].label} em outra tarefa
+                                </span>
+                              )}
                               {conflict.type === 'personal_event_block' && '🚫 Evento pessoal bloqueante'}
                             </div>
                             <div className="text-red-700 mt-1">{conflict.message}</div>
@@ -1766,86 +1952,43 @@ export default function AllocationModal({
                         ))}
                       </div>
 
-                      {/* Override Option */}
+                      {/* Override: mudar dedicação para Compartilhado/Flexível */}
                       {allowOverride && (
                         <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded-lg">
                           <div className="text-sm text-yellow-900 font-medium mb-2">
-                            💡 Você pode alocar com prioridade diferente
+                            💡 Mude a Dedicação para continuar
                           </div>
-                          <p className="text-xs text-yellow-800 mb-3">
-                            As tarefas conflitantes têm prioridade: {conflictingPriorities.map(p => PRIORITY_CONFIG[p as 'alta' | 'media' | 'baixa']?.label || p).join(', ')}.
-                            Escolha uma prioridade diferente para criar hierarquia entre as tarefas.
-                          </p>
-
-                          {/* Priority Selection for Override */}
-                          <div className="space-y-2">
-                            <label className="text-xs font-semibold text-yellow-900">
-                              Selecione a prioridade desta alocação:
-                            </label>
-                            <div className="grid grid-cols-3 gap-2">
-                              {(['alta', 'media', 'baixa'] as const).map(p => {
-                                const isConflicting = conflictingPriorities.includes(p)
-                                const isDisabled = isConflicting
-
-                                return (
-                                  <button
-                                    key={p}
-                                    onClick={() => !isDisabled && setPriority(p)}
-                                    disabled={isDisabled}
-                                    className={`p-2 rounded-lg border-2 text-xs transition-all ${
-                                      isDisabled
-                                        ? 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
-                                        : priority === p
-                                        ? `${PRIORITY_CONFIG[p].color} border-current`
-                                        : 'border-gray-300 hover:border-gray-400 text-gray-700 bg-white'
-                                    }`}
-                                  >
-                                    <div className="font-medium">
-                                      {PRIORITY_CONFIG[p].label}
-                                    </div>
-                                    {isConflicting && (
-                                      <div className="text-xs mt-0.5 text-red-600">
-                                        ✗ Já em uso
-                                      </div>
-                                    )}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          </div>
-
-                          {/* Override Action Buttons */}
-                          <div className="flex gap-2 mt-3">
+                          <div className="grid grid-cols-2 gap-2">
                             <button
-                              onClick={handleForceAllocate}
-                              disabled={conflictingPriorities.includes(priority) || isSaving}
-                              className="flex-1 px-3 py-2 bg-yellow-600 text-white text-sm rounded font-medium hover:bg-yellow-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                              onClick={() => { setPriority('media'); setShowConflictWarning(false); setConflicts([]); setAllowOverride(false) }}
+                              className="p-2 rounded-lg border-2 border-yellow-400 bg-yellow-100 text-yellow-900 text-xs font-medium hover:bg-yellow-200 transition-colors"
                             >
-                              {isSaving ? 'Alocando...' : '✓ Alocar com Prioridade Diferente'}
+                              ⚡ Compartilhado<br/>
+                              <span className="font-normal opacity-80">Permite sobreposição com aviso</span>
                             </button>
                             <button
-                              onClick={() => {
-                                setShowConflictWarning(false)
-                                setConflicts([])
-                                setConflictingPriorities([])
-                                setAllowOverride(false)
-                                setSelectedResourceId('')
-                              }}
-                              className="px-3 py-2 bg-gray-600 text-white text-sm rounded hover:bg-gray-700 transition-colors"
+                              onClick={() => { setPriority('baixa'); setShowConflictWarning(false); setConflicts([]); setAllowOverride(false) }}
+                              className="p-2 rounded-lg border-2 border-blue-300 bg-blue-50 text-blue-900 text-xs font-medium hover:bg-blue-100 transition-colors"
                             >
-                              Cancelar
+                              🔓 Flexível<br/>
+                              <span className="font-normal opacity-80">Sem restrições</span>
                             </button>
                           </div>
+                          <button
+                            onClick={() => { setShowConflictWarning(false); setConflicts([]); setAllowOverride(false); setSelectedResourceId('') }}
+                            className="mt-2 w-full px-3 py-1.5 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300 transition-colors"
+                          >
+                            Escolher outro recurso
+                          </button>
                         </div>
                       )}
 
-                      {/* Cancel button for non-overridable conflicts */}
+                      {/* Apenas fechar para conflitos não-overridáveis */}
                       {!allowOverride && (
                         <button
                           onClick={() => {
                             setShowConflictWarning(false)
                             setConflicts([])
-                            setConflictingPriorities([])
                             setSelectedResourceId('')
                           }}
                           className="mt-3 px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
