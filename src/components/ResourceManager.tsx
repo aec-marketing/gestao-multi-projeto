@@ -1,12 +1,15 @@
 'use client'
 
 import React, { useState, useMemo, useEffect } from 'react'
+import Link from 'next/link'
 import { Resource } from '@/types/database.types'
 import { PRIORITY_CONFIG } from '@/types/allocation.types'
+import { PersonalEvent } from '@/types/personal-events.types'
 import { formatDateBR } from '@/utils/date.utils'
 import { useActiveResources, useAllocations, usePersonalEvents } from '@/hooks/useResources'
 import { useResourceContext } from '@/contexts/ResourceContext'
 import { dispatchToast } from '@/components/ui/ToastProvider'
+import PersonalEventModal from '@/components/modals/PersonalEventModal'
 
 interface ResourceManagerProps {
   onClose: () => void
@@ -16,8 +19,16 @@ export default function ResourceManager({ onClose }: ResourceManagerProps) {
   const { resources, isLoading: resourcesLoading } = useActiveResources()
   const { allocations, isLoading: allocationsLoading } = useAllocations()
   const { personalEvents, isLoading: eventsLoading } = usePersonalEvents()
+  const { refreshAll } = useResourceContext()
 
   const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null)
+  const [showNewResourceForm, setShowNewResourceForm] = useState(false)
+  const [newResourceName, setNewResourceName] = useState('')
+  const [newResourceHierarchy, setNewResourceHierarchy] = useState<'gerente' | 'lider' | 'operador'>('operador')
+  const [newResourceRole, setNewResourceRole] = useState('')
+  const [isSavingNew, setIsSavingNew] = useState(false)
+  const [editingEvent, setEditingEvent] = useState<PersonalEvent | null>(null)
+  const [showEventModal, setShowEventModal] = useState(false)
 
   const isLoading = resourcesLoading || allocationsLoading || eventsLoading
 
@@ -39,6 +50,57 @@ export default function ResourceManager({ onClose }: ResourceManagerProps) {
     }
     return groups
   }, [resources])
+
+  const handleCreateResource = async () => {
+    if (!newResourceName.trim()) {
+      dispatchToast('Informe o nome do recurso', 'error')
+      return
+    }
+    setIsSavingNew(true)
+    try {
+      const { supabase } = await import('@/lib/supabase')
+      const { error } = await supabase
+        .from('resources')
+        .insert({
+          name: newResourceName.trim(),
+          hierarchy: newResourceHierarchy,
+          role: newResourceRole.trim() || null,
+          is_active: true,
+          daily_capacity_minutes: 540,
+          hourly_rate: 0,
+        })
+      if (error) throw error
+      dispatchToast('Recurso criado com sucesso!', 'success')
+      setShowNewResourceForm(false)
+      setNewResourceName('')
+      setNewResourceRole('')
+      setNewResourceHierarchy('operador')
+      await refreshAll()
+    } catch (err) {
+      console.error('Erro ao criar recurso:', err)
+      dispatchToast('Erro ao criar recurso', 'error')
+    } finally {
+      setIsSavingNew(false)
+    }
+  }
+
+  const handleDeleteResource = async (resourceId: string, resourceName: string) => {
+    if (!window.confirm(`Excluir o recurso "${resourceName}"? Esta ação não pode ser desfeita.`)) return
+    try {
+      const { supabase } = await import('@/lib/supabase')
+      const { error } = await supabase
+        .from('resources')
+        .update({ is_active: false })
+        .eq('id', resourceId)
+      if (error) throw error
+      dispatchToast('Recurso removido', 'success')
+      setSelectedResourceId(null)
+      await refreshAll()
+    } catch (err) {
+      console.error('Erro ao excluir recurso:', err)
+      dispatchToast('Erro ao remover recurso', 'error')
+    }
+  }
 
   if (isLoading) {
     return (
@@ -78,8 +140,66 @@ export default function ResourceManager({ onClose }: ResourceManagerProps) {
           {/* Left Panel - Resource List (Independent Scroll) */}
           <div className="w-80 border-r flex flex-col bg-gray-50">
             <div className="p-4 border-b bg-white flex-shrink-0">
-              <h3 className="font-semibold text-gray-900">Equipe</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900">Equipe</h3>
+                <button
+                  onClick={() => setShowNewResourceForm(v => !v)}
+                  className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 transition-colors"
+                  title="Adicionar novo recurso"
+                >
+                  + Novo
+                </button>
+              </div>
               <p className="text-xs text-gray-600 mt-1">Selecione para ver detalhes</p>
+
+              {/* Formulário inline de novo recurso */}
+              {showNewResourceForm && (
+                <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                  <input
+                    type="text"
+                    value={newResourceName}
+                    onChange={e => setNewResourceName(e.target.value)}
+                    placeholder="Nome do recurso"
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={isSavingNew}
+                    autoFocus
+                  />
+                  <input
+                    type="text"
+                    value={newResourceRole}
+                    onChange={e => setNewResourceRole(e.target.value)}
+                    placeholder="Função (ex: Soldador)"
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-gray-900 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={isSavingNew}
+                  />
+                  <select
+                    value={newResourceHierarchy}
+                    onChange={e => setNewResourceHierarchy(e.target.value as 'gerente' | 'lider' | 'operador')}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm text-gray-900 bg-white focus:ring-2 focus:ring-blue-500"
+                    disabled={isSavingNew}
+                  >
+                    <option value="operador">👷 Operador</option>
+                    <option value="lider">👨‍💼 Líder</option>
+                    <option value="gerente">👔 Gerente</option>
+                  </select>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleCreateResource}
+                      disabled={isSavingNew}
+                      className="flex-1 px-2 py-1.5 bg-green-600 text-white rounded text-xs hover:bg-green-700 disabled:opacity-50 transition-colors"
+                    >
+                      {isSavingNew ? 'Salvando...' : 'Criar'}
+                    </button>
+                    <button
+                      onClick={() => setShowNewResourceForm(false)}
+                      disabled={isSavingNew}
+                      className="flex-1 px-2 py-1.5 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Scrollable Resource List */}
@@ -155,6 +275,8 @@ export default function ResourceManager({ onClose }: ResourceManagerProps) {
                 resources={resources}
                 allocations={allocations}
                 personalEvents={personalEvents}
+                onDeleteResource={handleDeleteResource}
+                onEditEvent={(event) => { setEditingEvent(event); setShowEventModal(true) }}
               />
             ) : (
               <div className="flex-1 flex items-center justify-center">
@@ -172,6 +294,18 @@ export default function ResourceManager({ onClose }: ResourceManagerProps) {
           </div>
         </div>
       </div>
+
+      {/* Modal de edição de evento pessoal */}
+      {showEventModal && (
+        <PersonalEventModal
+          isOpen={showEventModal}
+          onClose={() => { setShowEventModal(false); setEditingEvent(null) }}
+          onSuccess={async () => { setShowEventModal(false); setEditingEvent(null); await refreshAll() }}
+          resources={resources}
+          selectedResourceId={selectedResourceId || undefined}
+          eventToEdit={editingEvent || undefined}
+        />
+      )}
     </div>
   )
 }
@@ -254,16 +388,36 @@ function ResourceDetailsPanel({
   resourceId,
   resources,
   allocations,
-  personalEvents
+  personalEvents,
+  onDeleteResource,
+  onEditEvent
 }: {
   resourceId: string
   resources: Resource[]
   allocations: any[]
   personalEvents: any[]
+  onDeleteResource: (id: string, name: string) => void
+  onEditEvent: (event: any) => void
 }) {
   const resource = resources.find(r => r.id === resourceId)
   const resourceAllocations = allocations.filter(a => a.resource_id === resourceId)
-  const resourceEvents = personalEvents.filter(e => e.resource_id === resourceId)
+
+  // Filtro de validade por tipo: eventos muito passados não aparecem
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const resourceEvents = personalEvents.filter(e => {
+    if (e.resource_id !== resourceId) return false
+    const end = new Date(e.end_date)
+    end.setHours(0, 0, 0, 0)
+    // Treinamento: visível até 7 dias após o término
+    if (e.event_type === 'treinamento') {
+      const cutoff = new Date(end)
+      cutoff.setDate(cutoff.getDate() + 7)
+      return cutoff >= today
+    }
+    // Todos os outros: some no dia seguinte ao término
+    return end >= today
+  })
 
   // Estado local para edição
   const [isEditing, setIsEditing] = useState(false)
@@ -379,7 +533,16 @@ function ResourceDetailsPanel({
             {getHierarchyIcon(resource.hierarchy)}
           </div>
           <div className="flex-1">
-            <h3 className="text-2xl font-bold text-gray-900">{resource.name}</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-2xl font-bold text-gray-900">{resource.name}</h3>
+              <button
+                onClick={() => onDeleteResource(resource.id, resource.name)}
+                className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm hover:bg-red-200 transition-colors border border-red-200 flex items-center gap-1"
+                title="Excluir recurso"
+              >
+                🗑️ Excluir
+              </button>
+            </div>
             <div className="flex items-center gap-3 mt-1 text-sm text-gray-600">
               <span className="capitalize font-medium">{resource.role || `${resource.hierarchy === 'gerente' ? 'Gerente' : resource.hierarchy === 'lider' ? 'Líder' : 'Operador'}`}</span>
               {resource.email && (
@@ -626,26 +789,41 @@ function ResourceDetailsPanel({
               {resourceAllocations.map(allocation => (
                 <AllocationCard key={allocation.id} allocation={allocation} />
               ))}
+
             </div>
           )}
         </div>
 
         {/* Personal Events Section */}
-        {resourceEvents.length > 0 && (
-          <div>
-            <h4 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <span>📅</span>
               <span>Eventos Pessoais</span>
               <span className="text-sm font-normal text-gray-500">({resourceEvents.length})</span>
             </h4>
+            <button
+              onClick={() => onEditEvent(null)}
+              className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition-colors"
+              title="Adicionar evento pessoal"
+            >
+              + Evento
+            </button>
+          </div>
 
+          {resourceEvents.length === 0 ? (
+            <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+              <div className="text-3xl mb-2">📭</div>
+              <p className="text-gray-600 text-sm">Nenhum evento pessoal cadastrado</p>
+            </div>
+          ) : (
             <div className="space-y-3">
               {resourceEvents.map(event => (
-                <PersonalEventCard key={event.id} event={event} />
+                <PersonalEventCard key={event.id} event={event} onEdit={onEditEvent} />
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Quick Stats */}
         <div>
@@ -690,10 +868,19 @@ function AllocationCard({ allocation }: { allocation: any }) {
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-      {/* Project Info */}
+      {/* Project Info with navigation button */}
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Projeto:</span>
-        <span className="text-sm font-medium text-gray-700">{project?.name || 'Projeto não encontrado'}</span>
+        <span className="text-sm font-medium text-gray-700 flex-1">{project?.name || 'Projeto não encontrado'}</span>
+        {project?.id && (
+          <Link
+            href={`/projeto/${project.id}`}
+            className="px-2 py-1 bg-blue-50 text-blue-600 rounded text-xs hover:bg-blue-100 transition-colors border border-blue-200 flex items-center gap-1 whitespace-nowrap"
+            title="Ir para o projeto"
+          >
+            🔗 Abrir
+          </Link>
+        )}
       </div>
 
       {/* Task Name */}
@@ -733,7 +920,7 @@ function AllocationCard({ allocation }: { allocation: any }) {
 }
 
 // Personal Event Card Component
-function PersonalEventCard({ event }: { event: any }) {
+function PersonalEventCard({ event, onEdit }: { event: any; onEdit: (event: any) => void }) {
   const eventTypeLabels: Record<string, string> = {
     medico: '🏥 Médico',
     ferias: '🏖️ Férias',
@@ -751,11 +938,20 @@ function PersonalEventCard({ event }: { event: any }) {
     }`}>
       <div className="flex items-start justify-between mb-2">
         <div className="font-semibold text-gray-900">{event.title}</div>
-        {event.blocks_work && (
-          <span className="px-2 py-1 bg-red-600 text-white text-xs rounded-full font-medium">
-            Bloqueia trabalho
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {event.blocks_work && (
+            <span className="px-2 py-1 bg-red-600 text-white text-xs rounded-full font-medium">
+              Bloqueia trabalho
+            </span>
+          )}
+          <button
+            onClick={() => onEdit(event)}
+            className="px-2 py-1 bg-white text-gray-600 rounded text-xs hover:bg-gray-100 transition-colors border border-gray-300"
+            title="Editar evento"
+          >
+            ✏️ Editar
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 mb-2">

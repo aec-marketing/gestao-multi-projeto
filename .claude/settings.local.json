@@ -14,7 +14,8 @@
       "Bash(npm install:*)",
       "Bash(if not exist docs mkdir docs)",
       "Bash(grep -E \"as \\(any|unknown\\)\" ./components/*.tsx ./components/*/*.tsx ./components/*/*/*.tsx ./utils/*.ts)",
-      "Bash(xargs grep -l \"msproject.*parse\\\\|msproject.*import\")"
+      "Bash(xargs grep -l \"msproject.*parse\\\\|msproject.*import\")",
+      "Bash(ls -lR \"d:\\\\AeC\\\\2025\\\\Aplicativo-Gestão-de-Projetos-Automação\\\\gestao-multi-projeto\\\\src\\\\app\\\\\\(dashboard\\)\")"
     ],
     "deny": [],
     "ask": []

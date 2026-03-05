@@ -36,6 +36,8 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
 }: TaskDurationCellProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [localValue, setLocalValue] = useState(value)
+  const localValueRef = React.useRef(value)  // Ref para evitar stale closure no handleBlur/handleEnter
+  const committedRef = React.useRef(false)   // Evitar duplo commit (blur + enter)
   const [tooltipVisible, setTooltipVisible] = useState(false)
   const [tooltipStyle, setTooltipStyle] = useState<React.CSSProperties>({})
   const [tooltipArrow, setTooltipArrow] = useState<'top' | 'bottom'>('top')
@@ -44,6 +46,7 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
   // Sincronizar com valor externo
   useEffect(() => {
     setLocalValue(value)
+    localValueRef.current = value
   }, [value])
 
   // Calcular posição fixed para o tooltip (evita clipping por overflow ou stacking context)
@@ -86,26 +89,29 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
     }
 
     if (!disabled && !isReadOnly) {
+      committedRef.current = false
       setIsEditing(true)
     }
   }
 
   const handleChange = (minutes: number) => {
     setLocalValue(minutes)
+    localValueRef.current = minutes  // Manter ref síncrona para evitar stale closure
   }
 
   const handleBlur = () => {
     setIsEditing(false)
-    // Só notificar mudança se o valor realmente mudou
-    if (localValue !== value) {
-      onBlur(localValue)
+    if (!committedRef.current) {
+      committedRef.current = true
+      onBlur(localValueRef.current)
     }
   }
 
   const handleEnter = () => {
     setIsEditing(false)
-    if (localValue !== value) {
-      onBlur(localValue)
+    if (!committedRef.current) {
+      committedRef.current = true
+      onBlur(localValueRef.current)
     }
   }
 
@@ -221,6 +227,7 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
   ) : null
 
   // Modo DISPLAY (double-click para editar)
+  // Usa localValue para mostrar feedback imediato após edição (antes do save)
   return (
     <div ref={cellRef} className="relative">
       <div
@@ -229,7 +236,7 @@ export const TaskDurationCell = React.memo(function TaskDurationCell({
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        <TimeDisplay value={value} format="short" workType={workType} />
+        <TimeDisplay value={localValue} format="short" workType={workType} />
       </div>
       {tooltip}
     </div>

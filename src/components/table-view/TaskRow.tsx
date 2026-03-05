@@ -143,7 +143,7 @@ export const TaskRow = React.memo(function TaskRow({
         {/* Categoria (Work Type) - ONDA 3 */}
         <td className="px-4 py-2">
           <WorkTypeCell
-            value={task.work_type || 'work'}
+            value={getCurrentValue(task.id, 'work_type', task.work_type || 'work')}
             onChange={(newWorkType) => {
               // Atualizar work_type
               onFieldChange(task.id, 'work_type', newWorkType, task.work_type, task.name)
@@ -167,7 +167,7 @@ export const TaskRow = React.memo(function TaskRow({
             }
             onBlur={(minutes) => onFieldChange(task.id, 'duration_minutes', minutes, task.duration_minutes, task.name)}
             hasPendingChange={hasChange(task.id, 'duration_minutes')}
-            workType={task.work_type}
+            workType={getCurrentValue(task.id, 'work_type', task.work_type)}
             isReadOnly={hasSubtasks}
           />
         </td>
