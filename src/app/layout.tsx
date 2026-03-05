@@ -5,6 +5,8 @@ import { ResourceProvider } from '@/contexts/ResourceContext'
 import { QueryProvider } from '@/providers/QueryProvider'
 import { ToastProvider } from '@/components/ui/ToastProvider'
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
   title: 'Sistema de Gestão Multi-Projeto',
   description: 'Gestão consolidada de múltiplos projetos com interface similar ao MS Project',

@@ -346,7 +346,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
         if (task && task.start_date !== changes.start_date) {
           tasksWithStartDateChange.set(update.id, {
             oldDate: task.start_date || '',
-            newDate: changes.start_date
+            newDate: changes.start_date ?? ''
           })
         }
       }

@@ -60,6 +60,11 @@ export default function Dashboard() {
     refreshAll() // Recarregar recursos globalmente
   }
 
+  async function handleLogout() {
+    await supabase.auth.signOut()
+    window.location.href = '/login'
+  }
+
   // Loading state: aguarda tanto projetos quanto recursos
   const isLoading = projectsLoading || resourcesLoading
 
@@ -141,6 +146,14 @@ export default function Dashboard() {
             <button className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2">
               <span>📊</span>
               <span>Relatórios</span>
+            </button>
+            <button
+              onClick={handleLogout}
+              className="px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors flex items-center space-x-2 border border-red-200"
+              title="Sair da conta"
+            >
+              <span>🚪</span>
+              <span>Sair</span>
             </button>
           </div>
         </div>

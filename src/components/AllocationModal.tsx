@@ -1216,7 +1216,7 @@ export default function AllocationModal({
 
                       // Ordenar fragmentos por data
                       const sortedFragments = [...resourceAllocations].sort(
-                        (a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+                        (a, b) => new Date(a.start_date ?? '').getTime() - new Date(b.start_date ?? '').getTime()
                       )
 
                       // Calcular total de minutos

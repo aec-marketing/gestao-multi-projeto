@@ -117,7 +117,7 @@ export function PredecessorQuickMenu({
       // Recalcular datas em cascata a partir da tarefa predecessora
       const updates = recalculateTasksInCascade(
         predecessor.predecessor_id,
-        allTasks,
+        allTasks as any,
         updatedPredecessors
       )
 
@@ -240,7 +240,7 @@ export function PredecessorQuickMenu({
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800 bg-white"
                 />
                 <div className="text-xs text-gray-500 mt-1">
-                  Tempo de espera entre as tarefas. Ex: "2h", "30m", "1.5d", "2d 3h"
+                  {'Tempo de espera entre as tarefas. Ex: "2h", "30m", "1.5d", "2d 3h"'}
                 </div>
                 {error && (
                   <div className="text-xs text-red-600 mt-1">
@@ -281,7 +281,7 @@ export function PredecessorQuickMenu({
               <div className="flex justify-between items-center py-2 border-b">
                 <span className="text-sm text-gray-600">Atraso (Lag):</span>
                 <span className="font-medium text-gray-800">
-                  {predecessor.lag_minutes > 0 ? formatMinutes(predecessor.lag_minutes, 'auto') : 'Nenhum'}
+                  {(predecessor.lag_minutes ?? 0) > 0 ? formatMinutes(predecessor.lag_minutes ?? 0, 'auto') : 'Nenhum'}
                 </span>
               </div>
             </div>

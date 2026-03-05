@@ -126,7 +126,7 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
   // Ordenar alocações por data para fragmentos
   const sortedAllocations = isFragmented
     ? [...allocations].sort((a, b) =>
-        new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+        new Date(a.start_date ?? '').getTime() - new Date(b.start_date ?? '').getTime()
       )
     : allocations
 

@@ -116,7 +116,7 @@ export function MultiDayAllocationModal({
   // Calcular estimativas
   const overtimeHours = (currentDay.overflowMinutes / 60).toFixed(1)
   const maxOvertimeHours = currentDay.isWeekend ? overtimeHours : Math.min(2, parseFloat(overtimeHours)).toFixed(1)
-  const exceededHours = currentDay.isWeekend ? 0 : Math.max(0, parseFloat(overtimeHours) - 2).toFixed(1)
+  const exceededHours = currentDay.isWeekend ? '0' : Math.max(0, parseFloat(overtimeHours) - 2).toFixed(1)
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">

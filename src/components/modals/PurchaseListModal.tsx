@@ -216,7 +216,7 @@ export function PurchaseListModal({
           {/* Info */}
           <p className="text-xs text-gray-400 bg-gray-50 rounded p-3">
             Cada item será criado como uma subtarefa com prazo em dias corridos (incluindo fins de semana).
-            O campo "Fornecedor" é apenas informativo e pode ser preenchido depois.
+            {'O campo "Fornecedor" é apenas informativo e pode ser preenchido depois.'}
           </p>
         </div>
 

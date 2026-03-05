@@ -210,10 +210,10 @@ export function PredecessorLines({
     if (allocations.length >= 1) {
       // Usar a última alocação (fragmentada ou não)
       const sorted = [...allocations].sort((a, b) =>
-        new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+        new Date(a.start_date ?? '').getTime() - new Date(b.start_date ?? '').getTime()
       )
       const last = sorted[sorted.length - 1]
-      const startX = getDateX(last.start_date)
+      const startX = getDateX(last.start_date ?? '')
       const durationDays = (last.allocated_minutes || 540) / 540
       return startX + durationDays * columnWidth
     }
