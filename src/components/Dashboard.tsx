@@ -1,6 +1,7 @@
 'use client'
 
 import { supabase } from '@/lib/supabase'
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Project } from '@/types/database.types'
@@ -61,7 +62,7 @@ export default function Dashboard() {
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut()
+    const sbBrowser = createSupabaseBrowserClient(); await sbBrowser.auth.signOut()
     window.location.href = '/login'
   }
 
