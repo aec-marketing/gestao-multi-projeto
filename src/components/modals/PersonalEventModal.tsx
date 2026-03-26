@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Resource } from '@/types/allocation.types'
-import { 
-  CreatePersonalEventDTO, 
-  EventType, 
+import {
+  CreatePersonalEventDTO,
+  EventType,
   EVENT_TYPE_CONFIG,
   PersonalEvent
 } from '@/types/personal-events.types'
@@ -39,6 +39,8 @@ export default function PersonalEventModal({
     blocks_work: true,
     notes: ''
   })
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -47,7 +49,6 @@ export default function PersonalEventModal({
   useEffect(() => {
     if (isOpen) {
       if (eventToEdit) {
-        // Editando evento existente
         setFormData({
           resource_id: eventToEdit.resource_id,
           title: eventToEdit.title,
@@ -58,8 +59,9 @@ export default function PersonalEventModal({
           blocks_work: eventToEdit.blocks_work,
           notes: eventToEdit.notes || ''
         })
+        setStartTime(eventToEdit.start_time || '')
+        setEndTime(eventToEdit.end_time || '')
       } else {
-        // Criando novo evento - usar valores selecionados
         const dateISO = selectedDate ? formatDateToISO(selectedDate) : ''
         setFormData({
           resource_id: selectedResourceId || '',
@@ -71,6 +73,8 @@ export default function PersonalEventModal({
           blocks_work: true,
           notes: ''
         })
+        setStartTime('')
+        setEndTime('')
       }
       setError(null)
     }
@@ -84,7 +88,15 @@ export default function PersonalEventModal({
   }
 
   function handleChange(field: keyof CreatePersonalEventDTO, value: any) {
-    setFormData(prev => ({ ...prev, [field]: value }))
+    setFormData(prev => {
+      const next = { ...prev, [field]: value }
+      // Quando marca "dia inteiro", limpa os horários
+      if (field === 'is_all_day' && value === true) {
+        setStartTime('')
+        setEndTime('')
+      }
+      return next
+    })
     setError(null)
   }
 
@@ -92,7 +104,6 @@ export default function PersonalEventModal({
     e.preventDefault()
     setError(null)
 
-    // Validações
     if (!formData.resource_id) {
       setError('Selecione uma pessoa')
       return
@@ -109,31 +120,43 @@ export default function PersonalEventModal({
       setError('Data final não pode ser anterior à data inicial')
       return
     }
+    if (!formData.is_all_day) {
+      if (!startTime || !endTime) {
+        setError('Informe o horário de início e fim para evento parcial')
+        return
+      }
+      if (endTime <= startTime) {
+        setError('Horário de fim deve ser posterior ao de início')
+        return
+      }
+    }
 
     setIsSubmitting(true)
 
     try {
+      const payload = {
+        title: formData.title,
+        event_type: formData.event_type,
+        start_date: formData.start_date,
+        end_date: formData.end_date,
+        is_all_day: formData.is_all_day,
+        blocks_work: formData.blocks_work,
+        notes: formData.notes || null,
+        start_time: !formData.is_all_day && startTime ? startTime : null,
+        end_time: !formData.is_all_day && endTime ? endTime : null,
+      }
+
       if (eventToEdit) {
-        // Atualizar evento existente
         const { error: updateError } = await supabase
           .from('personal_events')
-          .update({
-            title: formData.title,
-            event_type: formData.event_type,
-            start_date: formData.start_date,
-            end_date: formData.end_date,
-            is_all_day: formData.is_all_day,
-            blocks_work: formData.blocks_work,
-            notes: formData.notes || null
-          })
+          .update(payload)
           .eq('id', eventToEdit.id)
 
         if (updateError) throw updateError
       } else {
-        // Criar novo evento
         const { error: insertError } = await supabase
           .from('personal_events')
-          .insert([formData])
+          .insert([{ ...payload, resource_id: formData.resource_id }])
 
         if (insertError) throw insertError
       }
@@ -159,6 +182,8 @@ export default function PersonalEventModal({
       blocks_work: true,
       notes: ''
     })
+    setStartTime('')
+    setEndTime('')
     setError(null)
   }
 
@@ -251,8 +276,8 @@ export default function PersonalEventModal({
                   onClick={() => handleChange('event_type', type)}
                   className={`
                     p-3 rounded-lg border-2 transition-all text-center
-                    ${formData.event_type === type 
-                      ? `${config.bgColor} ${config.borderColor} ${config.color}` 
+                    ${formData.event_type === type
+                      ? `${config.bgColor} ${config.borderColor} ${config.color}`
                       : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
                     }
                   `}
@@ -328,6 +353,42 @@ export default function PersonalEventModal({
               </div>
             </label>
 
+            {/* Horários — visível apenas quando NÃO é dia inteiro */}
+            {!formData.is_all_day && (
+              <div className="ml-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm font-medium text-blue-800 mb-3">Horário do evento</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Início *
+                    </label>
+                    <input
+                      type="time"
+                      value={startTime}
+                      onChange={(e) => { setStartTime(e.target.value); setError(null) }}
+                      className="w-full px-3 py-2 border rounded-lg text-gray-900 bg-white text-sm"
+                      required={!formData.is_all_day}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Fim *
+                    </label>
+                    <input
+                      type="time"
+                      value={endTime}
+                      onChange={(e) => { setEndTime(e.target.value); setError(null) }}
+                      className="w-full px-3 py-2 border rounded-lg text-gray-900 bg-white text-sm"
+                      required={!formData.is_all_day}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-blue-600 mt-2">
+                  A pessoa estará disponível fora deste horário
+                </p>
+              </div>
+            )}
+
             <label className="flex items-center space-x-3">
               <input
                 type="checkbox"
@@ -338,7 +399,9 @@ export default function PersonalEventModal({
               <div>
                 <span className="text-gray-900 font-medium">Bloqueia trabalho</span>
                 <p className="text-xs text-gray-500">
-                  Pessoa não estará disponível para tarefas neste período
+                  {formData.is_all_day
+                    ? 'Pessoa não estará disponível para tarefas neste período'
+                    : 'Exibe aviso ao alocar tarefa neste dia'}
                 </p>
               </div>
             </label>
@@ -366,7 +429,6 @@ export default function PersonalEventModal({
 
           {/* Actions */}
           <div className="flex justify-between items-center pt-4 border-t">
-            {/* Botão Deletar (apenas ao editar) */}
             {eventToEdit && !showDeleteConfirm && (
               <button
                 type="button"
@@ -378,7 +440,6 @@ export default function PersonalEventModal({
               </button>
             )}
 
-            {/* Confirmação de exclusão */}
             {showDeleteConfirm && (
               <div className="flex items-center space-x-2">
                 <span className="text-sm text-gray-700 font-medium">Confirmar exclusão?</span>
@@ -403,7 +464,6 @@ export default function PersonalEventModal({
 
             {!eventToEdit && <div></div>}
 
-            {/* Botões principais */}
             <div className="flex space-x-3">
               <button
                 type="button"

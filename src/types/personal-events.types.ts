@@ -24,6 +24,8 @@ export interface PersonalEvent {
   event_type: EventType
   start_date: string  // ISO date string (YYYY-MM-DD)
   end_date: string    // ISO date string (YYYY-MM-DD)
+  start_time?: string | null  // 'HH:MM' — null ou ausente = dia inteiro
+  end_time?: string | null    // 'HH:MM' — null ou ausente = dia inteiro
   is_all_day: boolean
   blocks_work: boolean
   notes?: string
@@ -47,6 +49,8 @@ export interface CreatePersonalEventDTO {
   event_type: EventType
   start_date: string
   end_date: string
+  start_time?: string | null
+  end_time?: string | null
   is_all_day?: boolean
   blocks_work?: boolean
   notes?: string
@@ -60,6 +64,8 @@ export interface UpdatePersonalEventDTO {
   event_type?: EventType
   start_date?: string
   end_date?: string
+  start_time?: string | null
+  end_time?: string | null
   is_all_day?: boolean
   blocks_work?: boolean
   notes?: string
@@ -153,6 +159,21 @@ export function getEventDuration(event: PersonalEvent): number {
   const diffTime = Math.abs(end.getTime() - start.getTime())
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
   return diffDays + 1 // +1 porque inclui ambos os dias
+}
+
+/**
+ * Utilitário para formatar horário do evento
+ * Retorna "das 13h às 17h" ou null se for dia inteiro
+ */
+export function formatEventTime(event: PersonalEvent): string | null {
+  if (!event.start_time || !event.end_time) return null
+
+  const formatHour = (time: string) => {
+    const [h, m] = time.split(':')
+    return m === '00' ? `${parseInt(h)}h` : `${parseInt(h)}h${m}`
+  }
+
+  return `das ${formatHour(event.start_time)} às ${formatHour(event.end_time)}`
 }
 
 /**

@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { Resource, CalendarEvent } from '@/types/allocation.types'
-import { PersonalEvent, EVENT_TYPE_CONFIG } from '@/types/personal-events.types'
+import { PersonalEvent, EVENT_TYPE_CONFIG, formatEventTime } from '@/types/personal-events.types'
 import { TimelineZoom } from './TimelineZoomControl'
 import DayCell from './DayCell'
 import TimelineTaskBar from './TimelineTaskBar'
@@ -269,7 +269,7 @@ export default function TimelineResourceRow({
                 height: '24px',
                 zIndex: 5,
               }}
-              title={`${eventBar.event.title} (${eventBar.event.event_type})`}
+              title={`${eventBar.event.title} (${eventBar.event.event_type})${formatEventTime(eventBar.event) ? ' — ' + formatEventTime(eventBar.event) : ''}`}
               onClick={(e) => {
                 e.stopPropagation()
                 onPersonalEventClick?.(eventBar.event)

@@ -46,6 +46,7 @@ export default function AllocationModal({
   const [conflicts, setConflicts] = useState<ResourceConflict[]>([])
   const [showConflictWarning, setShowConflictWarning] = useState(false)
   const [allowOverride, setAllowOverride] = useState(false)
+  const [partialWarnings, setPartialWarnings] = useState<ResourceConflict[]>([])
 
   // Conflitos de alocação global (entre projetos)
   const [allocationConflicts, setAllocationConflicts] = useState<ResourceConflict[]>([])
@@ -438,6 +439,7 @@ export default function AllocationModal({
     setIsSaving(true)
     setConflicts([])
     setShowConflictWarning(false)
+    setPartialWarnings([])
 
     try {
       // ONDA 3: Verificação de conflitos (só para novas alocações)
@@ -451,8 +453,9 @@ export default function AllocationModal({
           task.end_date
         )
 
-        // Filtrar apenas conflitos de eventos pessoais bloqueantes
+        // Filtrar conflitos bloqueantes (dia inteiro) vs avisos parciais (horário específico)
         const personalEventConflicts = availabilityCheck.conflicts.filter(c => c.type === 'personal_event_block')
+        const partialEventWarnings = availabilityCheck.conflicts.filter(c => c.type === 'personal_event_partial')
 
         // Só bloquear se houver eventos pessoais bloqueantes (férias, folga, etc)
         if (personalEventConflicts.length > 0) {
@@ -461,6 +464,11 @@ export default function AllocationModal({
           setAllowOverride(false)  // Não permitir override de eventos pessoais
           setIsSaving(false)
           return
+        }
+
+        // Eventos parciais: apenas avisar, não bloquear
+        if (partialEventWarnings.length > 0) {
+          setPartialWarnings(partialEventWarnings)
         }
 
         // Verificação de conflitos de alocação baseada em dedicação (priority)
@@ -2000,6 +2008,26 @@ export default function AllocationModal({
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Banner de aviso informativo — eventos pessoais parciais */}
+        {partialWarnings.length > 0 && (
+          <div className="mx-6 mb-2 p-3 bg-yellow-50 border border-yellow-300 rounded-lg">
+            <div className="flex items-start gap-2">
+              <span className="text-yellow-600 text-lg">⚠️</span>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-yellow-900 mb-1">
+                  Atenção: compromisso parcial neste período
+                </p>
+                {partialWarnings.map((w, i) => (
+                  <p key={i} className="text-xs text-yellow-800">{w.message}</p>
+                ))}
+                <p className="text-xs text-yellow-700 mt-1">
+                  A alocação será salva normalmente — ajuste se necessário.
+                </p>
+              </div>
             </div>
           </div>
         )}

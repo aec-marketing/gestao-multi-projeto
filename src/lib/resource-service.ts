@@ -20,7 +20,7 @@ import { parseLocalDate } from '@/utils/date.utils'
  * Conflict information
  */
 export interface ResourceConflict {
-  type: 'allocation_overlap' | 'personal_event_block' | 'overload'
+  type: 'allocation_overlap' | 'personal_event_block' | 'personal_event_partial' | 'overload'
   message: string
   date: string
   details?: unknown
@@ -179,11 +179,15 @@ export async function checkPersonalEventConflicts(
 
       // Check for overlap
       if (eventStart <= end && eventEnd >= start) {
+        const isPartial = !event.is_all_day && event.start_time && event.end_time
+        const timeLabel = isPartial ? ` das ${event.start_time.slice(0,5)} às ${event.end_time.slice(0,5)}` : ''
         conflicts.push({
-          type: 'personal_event_block',
-          message: `Recurso indisponível: ${event.title} (${event.event_type}) de ${event.start_date} a ${event.end_date}`,
+          type: isPartial ? 'personal_event_partial' : 'personal_event_block',
+          message: isPartial
+            ? `Recurso com compromisso parcial: ${event.title}${timeLabel}`
+            : `Recurso indisponível: ${event.title} (${event.event_type}) de ${event.start_date} a ${event.end_date}`,
           date: event.start_date,
-          details: { eventId: event.id, eventType: event.event_type, title: event.title }
+          details: { eventId: event.id, eventType: event.event_type, title: event.title, startTime: event.start_time, endTime: event.end_time }
         })
       }
     }

@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import { Resource } from '@/types/database.types'
 import { PRIORITY_CONFIG } from '@/types/allocation.types'
-import { PersonalEvent } from '@/types/personal-events.types'
+import { PersonalEvent, formatEventTime } from '@/types/personal-events.types'
 import { formatDateBR } from '@/utils/date.utils'
 import { useActiveResources, useAllocations, usePersonalEvents } from '@/hooks/useResources'
 import { useResourceContext } from '@/contexts/ResourceContext'
@@ -963,6 +963,9 @@ function PersonalEventCard({ event, onEdit }: { event: any; onEdit: (event: any)
       <div className="text-sm text-gray-700">
         <span className="font-medium">Período:</span>{' '}
         {formatDateBR(event.start_date)} até {formatDateBR(event.end_date)}
+        {formatEventTime(event) && (
+          <span className="ml-2 text-gray-500">— {formatEventTime(event)}</span>
+        )}
       </div>
 
       {event.notes && (
