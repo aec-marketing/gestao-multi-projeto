@@ -45,16 +45,32 @@ interface XMLProject {
 function parseHours(isoDuration: string): number {
   if (!isoDuration) return 0
   const hourMatch = isoDuration.match(/PT(\d+)H/)
-  return hourMatch ? parseInt(hourMatch[1]) : 0
+  const minMatch = isoDuration.match(/(\d+)M/)
+  const hours = hourMatch ? parseInt(hourMatch[1]) : 0
+  const minutes = minMatch ? parseInt(minMatch[1]) : 0
+  return hours + minutes / 60
+}
+
+/**
+ * Parse da duração ISO 8601 para minutos totais
+ * Exemplo: PT88H0M0S → 5280 min | PT0H48M0S → 48 min
+ */
+function parseTotalMinutes(isoDuration: string): number {
+  if (!isoDuration) return 0
+  const hourMatch = isoDuration.match(/PT(\d+)H/)
+  const minMatch = isoDuration.match(/(\d+)M/)
+  const hours = hourMatch ? parseInt(hourMatch[1]) : 0
+  const minutes = minMatch ? parseInt(minMatch[1]) : 0
+  return hours * 60 + minutes
 }
 
 /**
  * Parse da duração ISO 8601 para dias úteis (8h/dia)
- * Exemplo: PT88H0M0S → 11 dias (88h / 8h por dia)
+ * Exemplo: PT88H0M0S → 11 dias | PT0H48M0S → 0.1 dias
  */
 function parseDuration(isoDuration: string): number {
-  const hours = parseHours(isoDuration)
-  return Math.ceil(hours / 8) // 8 horas por dia útil
+  const totalMinutes = parseTotalMinutes(isoDuration)
+  return totalMinutes / (8 * 60) // dias úteis decimais (8h/dia)
 }
 
 /**
@@ -163,9 +179,10 @@ export async function parseMSProjectXML(xmlContent: string): Promise<ImportPrevi
       finish: new Date(xmlTask.Finish),
       duration: parseDuration(xmlTask.Duration),
       durationHours: parseHours(xmlTask.Duration),
+      durationMinutes: parseTotalMinutes(xmlTask.Duration),
       percentComplete: xmlTask.PercentComplete || 0,
-      isSummary: xmlTask.Summary === 1,
-      isCritical: xmlTask.Critical === 1,
+      isSummary: xmlTask.Summary == 1,   // == intencional: XML pode retornar string "1"
+      isCritical: xmlTask.Critical == 1,  // == intencional: XML pode retornar string "1"
       predecessors
     }
   })

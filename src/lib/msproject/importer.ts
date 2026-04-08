@@ -156,7 +156,7 @@ export async function importMSProject(
       let workType: 'work' | 'wait' | 'milestone'
       let durationMinutes: number
 
-      if (task.duration === 0 && !task.isSummary) {
+      if ((task.durationMinutes === 0 || task.durationMinutes == null) && !task.isSummary) {
         // Tarefa com duração zero E não é summary = MILESTONE real
         workType = 'milestone'
         durationMinutes = 0
@@ -168,11 +168,11 @@ export async function importMSProject(
       } else if (task.isSummary) {
         // Tarefa summary normal = WORK
         workType = 'work'
-        durationMinutes = task.duration > 0 ? daysToMinutes(task.duration) : 1
+        durationMinutes = task.durationMinutes > 0 ? task.durationMinutes : 1
       } else {
-        // Tarefa normal = WORK com duração do MS Project
+        // Tarefa normal = WORK — usar minutos diretamente do XML (preserva sub-hora)
         workType = 'work'
-        durationMinutes = task.duration > 0 ? daysToMinutes(task.duration) : 1
+        durationMinutes = task.durationMinutes > 0 ? task.durationMinutes : 1
       }
 
       // Inserir tarefa
