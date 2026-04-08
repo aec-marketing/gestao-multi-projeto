@@ -4,7 +4,7 @@
  * ONDA 5.6: Layout otimizado e compacto
  */
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Task, Resource } from '@/types/database.types'
 import { Allocation } from '@/types/allocation.types'
 import { formatDateBR } from '@/utils/date.utils'
@@ -17,17 +17,28 @@ interface GanttDetailsPanelProps {
   allocations: Array<Allocation & { resource: Resource }>
   onClose: () => void
   onUpdate?: () => void
+  onCloseSubtasks?: (taskId: string) => void
+  hasChildren?: boolean
 }
 
 export function GanttDetailsPanel({
   task,
   allocations,
   onClose,
-  onUpdate
+  onUpdate,
+  onCloseSubtasks,
+  hasChildren = false
 }: GanttDetailsPanelProps) {
   const [isMinimized, setIsMinimized] = useState(false)
   const [localProgress, setLocalProgress] = useState(task.progress ?? 0)
   const [isSavingProgress, setIsSavingProgress] = useState(false)
+  const isSummary = hasChildren
+
+  // Re-sincroniza quando o progresso da tarefa muda externamente
+  // (ex: encerrar subtarefas → pai atualiza via onRefresh)
+  useEffect(() => {
+    setLocalProgress(task.progress ?? 0)
+  }, [task.progress])
   const workTypeLabel = workTypeLabels[task.work_type || 'work']
 
   const handleProgressChange = (value: number) => {
@@ -138,38 +149,67 @@ export function GanttDetailsPanel({
             </div>
           </div>
 
-          {/* Linha 3: Progresso (editável) */}
+          {/* Linha 3: Progresso */}
           <div className="bg-white/80 rounded px-2 py-2 text-xs">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-gray-500">Progresso:</span>
+              <span className="text-gray-500">
+                {isSummary ? 'Progresso (média filhos):' : 'Progresso:'}
+              </span>
               <span className={`font-bold w-8 text-right ${
                 localProgress === 100 ? 'text-green-600' : 'text-blue-600'
               }`}>
                 {localProgress}%
               </span>
             </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={localProgress}
-              disabled={isSavingProgress}
-              onChange={(e) => handleProgressChange(Number(e.target.value))}
-              onMouseUp={(e) => handleProgressSave(Number((e.target as HTMLInputElement).value))}
-              onTouchEnd={(e) => handleProgressSave(Number((e.target as HTMLInputElement).value))}
-              className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500 disabled:opacity-50"
-              style={{
-                background: `linear-gradient(to right, ${localProgress === 100 ? '#22c55e' : '#3b82f6'} ${localProgress}%, #e5e7eb ${localProgress}%)`
-              }}
-            />
-            <div className="flex justify-between text-[9px] text-gray-400 mt-0.5 px-0.5">
-              <span>0%</span>
-              <span>25%</span>
-              <span>50%</span>
-              <span>75%</span>
-              <span>100%</span>
-            </div>
+
+            {isSummary ? (
+              // Tarefa pai: barra read-only + botão encerrar subtarefas
+              <>
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                  <div
+                    className={`h-1.5 rounded-full transition-all ${localProgress === 100 ? 'bg-green-500' : 'bg-blue-400'}`}
+                    style={{ width: `${localProgress}%` }}
+                  />
+                </div>
+                {localProgress < 100 && onCloseSubtasks && (
+                  <button
+                    onClick={() => onCloseSubtasks(task.id)}
+                    className="mt-2 w-full py-1 text-[10px] font-medium bg-green-50 text-green-700 border border-green-300 rounded hover:bg-green-100 transition-colors"
+                  >
+                    ✓ Encerrar todas as subtarefas
+                  </button>
+                )}
+                {localProgress === 100 && (
+                  <p className="mt-1 text-[10px] text-green-600 text-center font-medium">Todas as subtarefas concluídas</p>
+                )}
+              </>
+            ) : (
+              // Tarefa folha: slider editável
+              <>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={localProgress}
+                  disabled={isSavingProgress}
+                  onChange={(e) => handleProgressChange(Number(e.target.value))}
+                  onMouseUp={(e) => handleProgressSave(Number((e.target as HTMLInputElement).value))}
+                  onTouchEnd={(e) => handleProgressSave(Number((e.target as HTMLInputElement).value))}
+                  className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500 disabled:opacity-50"
+                  style={{
+                    background: `linear-gradient(to right, ${localProgress === 100 ? '#22c55e' : '#3b82f6'} ${localProgress}%, #e5e7eb ${localProgress}%)`
+                  }}
+                />
+                <div className="flex justify-between text-[9px] text-gray-400 mt-0.5 px-0.5">
+                  <span>0%</span>
+                  <span>25%</span>
+                  <span>50%</span>
+                  <span>75%</span>
+                  <span>100%</span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Linha 4: Tipo de tarefa */}

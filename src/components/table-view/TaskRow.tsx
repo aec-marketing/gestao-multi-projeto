@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Task, Resource } from '@/types/database.types'
 import { Allocation } from '@/types/allocation.types'
 import { TaskEditCell } from './TaskEditCell'
@@ -33,6 +33,7 @@ interface TaskRowProps {
   onSaveSubtask: (parentId: string) => void
   onCancelSubtask: () => void
   isSavingSubtask: boolean
+  onCloseSubtasks: (taskId: string, taskName: string, subtaskCount: number) => void
 }
 
 /**
@@ -59,7 +60,8 @@ export const TaskRow = React.memo(function TaskRow({
   onSubtaskDurationChange,
   onSaveSubtask,
   onCancelSubtask,
-  isSavingSubtask
+  isSavingSubtask,
+  onCloseSubtasks
 }: TaskRowProps) {
   // Subtasks
   const subtasks = useMemo(
@@ -67,6 +69,9 @@ export const TaskRow = React.memo(function TaskRow({
     [allTasks, task.id]
   )
   const hasSubtasks = subtasks.length > 0
+
+  // Progresso local para o slider (folhas apenas)
+  const [localProgress, setLocalProgress] = useState(task.progress ?? 0)
 
   // Duração exibida do pai = span (max_end - min_start + 1) calculado dos filhos
   // Nunca soma durações — igual ao Gantt
@@ -264,17 +269,63 @@ export const TaskRow = React.memo(function TaskRow({
 
         {/* Progresso */}
         <td className="px-4 py-2">
-          <div className="flex items-center space-x-2">
-            <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-blue-600 h-2 rounded-full transition-all"
-                style={{ width: `${task.progress}%` }}
-              />
+          {hasSubtasks ? (
+            // Tarefa pai: progresso derivado dos filhos (read-only) + botão encerrar
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500">Média filhos</span>
+                  <span className={`text-xs font-bold ${task.progress === 100 ? 'text-green-600' : 'text-gray-700'}`}>
+                    {task.progress}%
+                  </span>
+                </div>
+                <div className="bg-gray-200 rounded-full h-1.5">
+                  <div
+                    className={`h-1.5 rounded-full transition-all ${task.progress === 100 ? 'bg-green-500' : 'bg-blue-400'}`}
+                    style={{ width: `${task.progress}%` }}
+                  />
+                </div>
+              </div>
+              {task.progress < 100 && (
+                <button
+                  onClick={() => onCloseSubtasks(task.id, task.name, subtasks.length)}
+                  className="shrink-0 px-2 py-1 text-[10px] font-medium bg-green-50 text-green-700 border border-green-300 rounded hover:bg-green-100 transition-colors"
+                  title="Marcar todas as subtarefas como 100% concluídas"
+                >
+                  ✓ Encerrar
+                </button>
+              )}
             </div>
-            <span className="text-xs text-gray-600 w-10 text-right font-medium">
-              {task.progress}%
-            </span>
-          </div>
+          ) : (
+            // Tarefa folha: slider editável — integrado ao sistema de batch (highlight + BatchSaveBar)
+            <div className={`flex items-center gap-2 min-w-[120px] rounded px-1 py-0.5 transition-colors ${hasChange(task.id, 'progress') ? 'bg-yellow-50 ring-1 ring-yellow-300' : ''}`}>
+              <div className="flex-1">
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={localProgress}
+                  onChange={(e) => setLocalProgress(Number(e.target.value))}
+                  onMouseUp={(e) => {
+                    const val = Number((e.target as HTMLInputElement).value)
+                    onFieldChange(task.id, 'progress', val, task.progress, task.name)
+                  }}
+                  onTouchEnd={(e) => {
+                    const val = Number((e.target as HTMLInputElement).value)
+                    onFieldChange(task.id, 'progress', val, task.progress, task.name)
+                  }}
+                  className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500"
+                  style={{
+                    background: `linear-gradient(to right, ${localProgress === 100 ? '#22c55e' : '#3b82f6'} ${localProgress}%, #e5e7eb ${localProgress}%)`
+                  }}
+                />
+              </div>
+              <span className={`text-xs font-bold w-8 text-right shrink-0 ${localProgress === 100 ? 'text-green-600' : 'text-gray-700'}`}>
+                {localProgress}%
+              </span>
+            </div>
+          )}
         </td>
 
         {/* Custo Estimado - Mantém editável */}
@@ -366,6 +417,7 @@ export const TaskRow = React.memo(function TaskRow({
           onSaveSubtask={onSaveSubtask}
           onCancelSubtask={onCancelSubtask}
           isSavingSubtask={isSavingSubtask}
+          onCloseSubtasks={onCloseSubtasks}
         />
       ))}
     </>

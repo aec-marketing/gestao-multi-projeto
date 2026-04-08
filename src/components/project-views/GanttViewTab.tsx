@@ -32,6 +32,7 @@ import AllocationModal from '@/components/AllocationModal'
 import SubtaskManager from '@/components/SubtaskManager'
 import RecalculateModal from '@/components/modals/RecalculateModal'
 import CycleAuditModal from '@/components/modals/CycleAuditModal'
+import { ConfirmModal } from '@/components/modals/ConfirmModal'
 import { getTaskColor } from '@/components/gantt/utils/ganttColors'
 import { PredecessorDragProvider } from '@/components/gantt/contexts/PredecessorDragContext'
 
@@ -618,6 +619,38 @@ export default function GanttViewTab({
     actions.closeModal('showRecalculate')
     onRefresh()
   }
+
+  // ========== ENCERRAR SUBTAREFAS ==========
+  const [closeSubtasksModal, setCloseSubtasksModal] = useState<{ taskId: string; taskName: string; count: number } | null>(null)
+
+  const handleCloseSubtasks = useCallback((taskId: string) => {
+    const subtasks = tasks.filter(t => t.parent_id === taskId)
+    const parentTask = tasks.find(t => t.id === taskId)
+    if (!parentTask || subtasks.length === 0) return
+    setCloseSubtasksModal({ taskId, taskName: parentTask.name, count: subtasks.length })
+  }, [tasks])
+
+  const handleConfirmCloseSubtasks = useCallback(async () => {
+    if (!closeSubtasksModal) return
+    const subtaskIds = tasks.filter(t => t.parent_id === closeSubtasksModal.taskId).map(t => t.id)
+    const { error } = await supabase
+      .from('tasks')
+      .update({ progress: 100 })
+      .in('id', subtaskIds)
+
+    if (error) {
+      dispatchToast('Erro ao encerrar subtarefas', 'error')
+    } else {
+      // Recalcular progresso do pai: todos os filhos = 100, então pai = 100
+      await supabase
+        .from('tasks')
+        .update({ progress: 100 })
+        .eq('id', closeSubtasksModal.taskId)
+      dispatchToast(`${closeSubtasksModal.count} subtarefa(s) encerrada(s)`, 'success')
+      onRefresh?.()
+    }
+    setCloseSubtasksModal(null)
+  }, [closeSubtasksModal, tasks, onRefresh])
 
   // ========== BATCH SAVE HANDLERS ==========
   const [isSaving, setIsSaving] = useState(false)
@@ -1460,6 +1493,19 @@ export default function GanttViewTab({
         </div>
       </div>
 
+      {/* Modal: encerrar subtarefas */}
+      {closeSubtasksModal && (
+        <ConfirmModal
+          isOpen={true}
+          onClose={() => setCloseSubtasksModal(null)}
+          onConfirm={handleConfirmCloseSubtasks}
+          title="Encerrar subtarefas"
+          message={`Isso irá marcar ${closeSubtasksModal.count} subtarefa(s) de "${closeSubtasksModal.taskName}" como 100% concluídas.\n\nDeseja continuar?`}
+          variant="warning"
+          confirmText="Sim, encerrar"
+        />
+      )}
+
       {/* Painel de detalhes flutuante */}
       {selectedTaskWithAllocations && (
         <GanttDetailsPanel
@@ -1467,6 +1513,8 @@ export default function GanttViewTab({
           allocations={selectedTaskWithAllocations.allocations}
           onClose={() => actions.selectTask(null)}
           onUpdate={onRefresh}
+          onCloseSubtasks={handleCloseSubtasks}
+          hasChildren={tasks.some(t => t.parent_id === selectedTaskWithAllocations.task.id)}
         />
       )}
 

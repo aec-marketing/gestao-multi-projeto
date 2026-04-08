@@ -127,6 +127,26 @@ async function syncAllocationsWithTaskStartDate(
 }
 
 /**
+ * Recalcula o progresso de um pai como média dos filhos e propaga em cascata até a raiz.
+ * allTasks deve refletir os valores mais recentes já salvos no banco.
+ */
+async function recalcParentProgress(childId: string, allTasks: { id: string; parent_id: string | null; progress: number }[]) {
+  const child = allTasks.find(t => t.id === childId)
+  if (!child?.parent_id) return
+
+  const parentId = child.parent_id
+  const siblings = allTasks.filter(t => t.parent_id === parentId)
+  if (siblings.length === 0) return
+
+  const avg = Math.round(siblings.reduce((sum, t) => sum + (t.progress ?? 0), 0) / siblings.length)
+
+  await supabase.from('tasks').update({ progress: avg }).eq('id', parentId)
+
+  // Propaga para o avô, se existir
+  await recalcParentProgress(parentId, allTasks.map(t => t.id === parentId ? { ...t, progress: avg } : t))
+}
+
+/**
  * TableViewTab - Componente principal da visualização em tabela
  *
  * Refatorado completamente com:
@@ -359,6 +379,14 @@ export default function TableViewTab({ project }: TableViewTabProps) {
       }
     })
 
+    // Identificar tarefas com mudanças de progress para recalcular pais
+    const tasksWithProgressChange = new Set<string>()
+    updates.forEach(update => {
+      if (update.updates.progress !== undefined) {
+        tasksWithProgressChange.add(update.id)
+      }
+    })
+
     try {
       await batchUpdateMutation.mutateAsync(updates)
 
@@ -376,6 +404,22 @@ export default function TableViewTab({ project }: TableViewTabProps) {
         await Promise.all(
           Array.from(tasksToRecalculate).map(taskId =>
             updateTaskActualCost(taskId)
+          )
+        )
+      }
+
+      // Recalcular progresso dos pais para cada tarefa com progresso alterado
+      if (tasksWithProgressChange.size > 0) {
+        // Construir snapshot com valores já salvos (aplica as mudanças do batch)
+        const updatedTasks = tasks.map(t => {
+          const update = updates.find(u => u.id === t.id)
+          return update?.updates.progress !== undefined
+            ? { ...t, progress: update.updates.progress as number }
+            : t
+        })
+        await Promise.all(
+          Array.from(tasksWithProgressChange).map(taskId =>
+            recalcParentProgress(taskId, updatedTasks)
           )
         )
       }
@@ -566,6 +610,41 @@ export default function TableViewTab({ project }: TableViewTabProps) {
     setAllocationModal(null)
     // Dados serão recarregados automaticamente via React Query
   }, [])
+
+  /**
+   * Exibe confirmação e encerra todas as subtarefas de uma tarefa pai (progress = 100)
+   */
+  const handleCloseSubtasks = useCallback((taskId: string, taskName: string, subtaskCount: number) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Encerrar subtarefas',
+      message: `Isso irá marcar ${subtaskCount} subtarefa(s) de "${taskName}" como 100% concluídas.\n\nDeseja continuar?`,
+      variant: 'warning',
+      onConfirm: async () => {
+        const subtaskIds = tasks
+          .filter(t => t.parent_id === taskId)
+          .map(t => t.id)
+
+        const { error } = await supabase
+          .from('tasks')
+          .update({ progress: 100 })
+          .in('id', subtaskIds)
+
+        if (error) {
+          dispatchToast('Erro ao encerrar subtarefas', 'error')
+        } else {
+          // Recalcular progresso do pai com todos os filhos = 100
+          const updatedTasks = tasks.map(t =>
+            subtaskIds.includes(t.id) ? { ...t, progress: 100 } : t
+          )
+          await recalcParentProgress(subtaskIds[0], updatedTasks)
+          await queryClient.invalidateQueries({ queryKey: queryKeys.tasks.byProject(project.id) })
+          dispatchToast(`${subtaskCount} subtarefa(s) encerrada(s)`, 'success')
+        }
+        setConfirmModal(null)
+      }
+    })
+  }, [tasks, project.id, queryClient])
 
   /**
    * Handler para criar lista de compras
@@ -787,6 +866,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
                     onSaveSubtask={handleCreateSubtask}
                     onCancelSubtask={handleCancelCreateSubtask}
                     isSavingSubtask={createTaskMutation.isPending && addingSubtaskTo !== null}
+                    onCloseSubtasks={handleCloseSubtasks}
                   />
                 ))}
               </tbody>
