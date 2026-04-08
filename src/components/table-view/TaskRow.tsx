@@ -23,7 +23,7 @@ interface TaskRowProps {
   onAddSubtask: (taskId: string) => void
   onDelete: (taskId: string, taskName: string, hasSubtasks: boolean) => void
   onOpenAllocation: (taskId: string, allocationId?: string) => void  // ONDA 3: allocationId opcional para edição
-  calculateTotalCost: (taskId: string, field: 'estimated_cost' | 'actual_cost') => number
+  calculateTotalCost: (taskId: string) => number
   // Subtask creation
   addingSubtaskTo: string | null
   newSubtaskData: { name: string; workType: WorkType; duration: number }  // ONDA 3: Added workType
@@ -94,16 +94,24 @@ export const TaskRow = React.memo(function TaskRow({
   const indentLevel = task.outline_level || level
   const indent = indentLevel * 30
 
-  // Cost totals para tarefas pai
+  // Custo total para tarefas pai (estimated + alocação, recursivo)
   const totalEstimatedCost = useMemo(
-    () => hasSubtasks ? calculateTotalCost(task.id, 'estimated_cost') : 0,
+    () => hasSubtasks ? calculateTotalCost(task.id) : 0,
     [hasSubtasks, task.id, calculateTotalCost]
   )
 
-  const totalActualCost = useMemo(
-    () => hasSubtasks ? calculateTotalCost(task.id, 'actual_cost') : 0,
-    [hasSubtasks, task.id, calculateTotalCost]
-  )
+  // Custo por alocação (calculado client-side): soma de allocated_minutes * hourly_rate
+  const allocationCost = useMemo(() => {
+    const taskAllocs = allocations.filter(a => a.task_id === task.id)
+    return taskAllocs.reduce((sum, alloc) => {
+      const resource = resources.find(r => r.id === alloc.resource_id)
+      if (!resource) return sum
+      const minutes = alloc.allocated_minutes ?? task.duration_minutes ?? 0
+      const overtime = alloc.overtime_minutes ?? 0
+      const multiplier = alloc.overtime_multiplier ?? 1.5
+      return sum + (minutes / 60) * resource.hourly_rate + (overtime / 60) * resource.hourly_rate * multiplier
+    }, 0)
+  }, [allocations, task.id, task.duration_minutes, resources])
 
   // Task allocations
   const taskAllocations = useMemo(
@@ -328,41 +336,38 @@ export const TaskRow = React.memo(function TaskRow({
           )}
         </td>
 
-        {/* Custo Estimado - Mantém editável */}
+        {/* Custo — editável em tarefas folha, soma (Σ) em tarefas pai */}
         <td className="px-4 py-2 text-right">
           {hasSubtasks ? (
-            <div className="flex items-center justify-end gap-1">
-              <span className="text-xs text-gray-500">R$</span>
-              <span className="bg-green-50 text-green-700 px-2 py-1 rounded text-sm font-semibold">
-                {totalEstimatedCost.toFixed(2)}
-              </span>
-              <span className="text-xs text-gray-400" title="Soma das subtarefas">(Σ)</span>
-            </div>
+            <TaskCostCell
+              cost={totalEstimatedCost}
+              isReadOnly={true}
+            />
           ) : (
-            <div className="flex items-center justify-end gap-1">
-              <span className="text-xs text-gray-500">R$</span>
-              <TaskEditCell
-                value={getCurrentValue(task.id, 'estimated_cost', task.estimated_cost || '')}
-                type="number"
-                min={0}
-                step={0.01}
-                placeholder="0,00"
-                onBlur={(value) => onFieldChange(task.id, 'estimated_cost', value, task.estimated_cost, task.name)}
-                hasPendingChange={hasChange(task.id, 'estimated_cost')}
-                className="w-24 text-right"
-              />
+            <div className="space-y-1">
+              <div className="flex items-center justify-end gap-1">
+                <span className="text-xs text-gray-500">R$</span>
+                <TaskEditCell
+                  value={getCurrentValue(task.id, 'estimated_cost', task.estimated_cost || '')}
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  placeholder="0,00"
+                  onBlur={(value) => onFieldChange(task.id, 'estimated_cost', value, task.estimated_cost, task.name)}
+                  hasPendingChange={hasChange(task.id, 'estimated_cost')}
+                  className="w-24 text-right"
+                />
+              </div>
+              {allocationCost > 0 && (
+                <div
+                  className="text-xs text-purple-600 text-right"
+                  title={`Custo por alocação de pessoas: R$ ${allocationCost.toFixed(2)}`}
+                >
+                  +R$ {allocationCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 👥
+                </div>
+              )}
             </div>
           )}
-        </td>
-
-        {/* Custo Real - ONDA 1: TaskCostCell com comparação visual */}
-        <td className="px-4 py-2 text-center">
-          <TaskCostCell
-            actualCost={hasSubtasks ? totalActualCost : (task.actual_cost || 0)}
-            estimatedCost={hasSubtasks ? totalEstimatedCost : (task.estimated_cost || 0)}
-            isReadOnly={hasSubtasks}
-            hasPendingChange={hasChange(task.id, 'actual_cost')}
-          />
         </td>
 
         {/* Ações */}

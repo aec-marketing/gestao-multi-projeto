@@ -1,160 +1,156 @@
 /**
  * Card de resumo de custos do projeto
- *
- * ONDA 1: Mostra totais de custos estimado vs real
- * Comparação visual com indicadores de status
+ * Mostra: custo das tarefas + despesas avulsas + orçamento editável + margem
  */
 
-import React from 'react'
-import { formatCurrency, compareCosts } from '@/utils/cost.utils'
+'use client'
+
+import React, { useState } from 'react'
+import { formatCurrency } from '@/utils/cost.utils'
+import { supabase } from '@/lib/supabase'
+import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface ProjectCostSummaryProps {
-  totalEstimatedCost: number
-  totalActualCost: number
+  projectId: string
+  budget: number | null          // Orçamento estimado do projeto
+  totalTaskCost: number          // Soma de estimated_cost das tarefas
+  totalExpenses: number          // Soma das despesas avulsas
+  onBudgetSaved: () => void      // Callback para invalidar cache após salvar
 }
 
 export function ProjectCostSummary({
-  totalEstimatedCost,
-  totalActualCost
+  projectId,
+  budget,
+  totalTaskCost,
+  totalExpenses,
+  onBudgetSaved
 }: ProjectCostSummaryProps) {
-  // Comparação
-  const comparison = totalEstimatedCost > 0
-    ? compareCosts(totalEstimatedCost, totalActualCost)
-    : null
+  const [isEditing, setIsEditing] = useState(false)
+  const [budgetInput, setBudgetInput] = useState(budget?.toString() || '')
+  const [isSaving, setIsSaving] = useState(false)
 
-  // Se não tem custos definidos
-  if (totalEstimatedCost === 0 && totalActualCost === 0) {
-    return null // Não exibe card se não há custos
+  const totalCost = totalTaskCost + totalExpenses
+  const budgetNum = budget ?? 0
+  const remaining = budgetNum - totalCost
+  const percentUsed = budgetNum > 0 ? Math.min((totalCost / budgetNum) * 100, 100) : 0
+
+  const handleSaveBudget = async () => {
+    setIsSaving(true)
+    const value = parseFloat(budgetInput) || 0
+    const { error } = await supabase
+      .from('projects')
+      .update({ budget: value })
+      .eq('id', projectId)
+
+    setIsSaving(false)
+    if (error) {
+      dispatchToast('Erro ao salvar orçamento', 'error')
+    } else {
+      dispatchToast('Orçamento salvo', 'success')
+      setIsEditing(false)
+      onBudgetSaved()
+    }
   }
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4 shadow-sm">
-      <div className="flex items-center justify-between">
-        {/* Título */}
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold text-gray-700">
-            💰 Resumo de Custos
-          </span>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-base font-semibold text-gray-700">💰 Resumo de Custos</span>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* Custo das tarefas */}
+        <div className="bg-gray-50 rounded-lg p-3">
+          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Custo das Tarefas</p>
+          <p className="text-lg font-bold text-gray-800">{formatCurrency(totalTaskCost)}</p>
         </div>
 
-        {/* Custos */}
-        <div className="flex items-center gap-6">
-          {/* Custo Estimado */}
-          <div className="text-right">
-            <div className="text-xs text-gray-500 uppercase tracking-wide">
-              Estimado
-            </div>
-            <div className="text-lg font-semibold text-gray-700">
-              {formatCurrency(totalEstimatedCost)}
-            </div>
+        {/* Despesas avulsas */}
+        <div className="bg-gray-50 rounded-lg p-3">
+          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Despesas Avulsas</p>
+          <p className="text-lg font-bold text-gray-800">{formatCurrency(totalExpenses)}</p>
+        </div>
+
+        {/* Total gasto */}
+        <div className="bg-blue-50 rounded-lg p-3">
+          <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Total Gasto</p>
+          <p className="text-lg font-bold text-blue-800">{formatCurrency(totalCost)}</p>
+        </div>
+
+        {/* Orçamento editável */}
+        <div className={`rounded-lg p-3 ${budgetNum > 0 ? (remaining < 0 ? 'bg-red-50' : 'bg-green-50') : 'bg-gray-50'}`}>
+          <div className="flex items-center justify-between mb-1">
+            <p className={`text-xs uppercase tracking-wide ${budgetNum > 0 ? (remaining < 0 ? 'text-red-600' : 'text-green-600') : 'text-gray-500'}`}>
+              Orçamento
+            </p>
+            {!isEditing && (
+              <button
+                onClick={() => { setIsEditing(true); setBudgetInput(budget?.toString() || '') }}
+                className="text-[10px] text-gray-400 hover:text-gray-600 underline"
+              >
+                editar
+              </button>
+            )}
           </div>
 
-          {/* Seta */}
-          <div className="text-gray-400">
-            →
-          </div>
-
-          {/* Custo Real */}
-          <div className="text-right">
-            <div className="text-xs text-gray-500 uppercase tracking-wide">
-              Real
+          {isEditing ? (
+            <div className="space-y-1.5">
+              <input
+                type="number"
+                step="0.01"
+                value={budgetInput}
+                onChange={(e) => setBudgetInput(e.target.value)}
+                className="w-full px-2 py-1 border border-gray-300 rounded text-sm text-gray-900 bg-white"
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && handleSaveBudget()}
+              />
+              <div className="flex gap-1">
+                <button
+                  onClick={handleSaveBudget}
+                  disabled={isSaving}
+                  className="flex-1 py-0.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isSaving ? '...' : 'Salvar'}
+                </button>
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="flex-1 py-0.5 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
-            <div className={`text-lg font-bold ${
-              !comparison
-                ? 'text-gray-700'
-                : comparison.status === 'overbudget'
-                ? 'text-red-600'
-                : comparison.status === 'warning'
-                ? 'text-orange-600'
-                : 'text-green-600'
-            }`}>
-              {formatCurrency(totalActualCost)}
-            </div>
-          </div>
-
-          {/* Badge de diferença */}
-          {comparison && comparison.difference !== 0 && (
-            <div className={`px-3 py-1 rounded-full text-sm font-semibold ${
-              comparison.status === 'overbudget'
-                ? 'bg-red-100 text-red-700 border border-red-300'
-                : comparison.status === 'warning'
-                ? 'bg-orange-100 text-orange-700 border border-orange-300'
-                : comparison.difference > 0
-                ? 'bg-blue-100 text-blue-700 border border-blue-300'
-                : 'bg-green-100 text-green-700 border border-green-300'
-            }`}>
-              {comparison.difference > 0 ? '+' : ''}
-              {comparison.percentageDiff.toFixed(1)}%
-            </div>
-          )}
-
-          {/* Status Badge */}
-          {comparison && (
-            <div className="ml-2">
-              {comparison.status === 'overbudget' && (
-                <div className="flex items-center gap-1 px-2 py-1 bg-red-50 text-red-700 text-xs font-medium rounded border border-red-200">
-                  <span>⚠️</span>
-                  <span>Acima do Orçamento</span>
-                </div>
+          ) : (
+            <>
+              <p className={`text-lg font-bold ${budgetNum > 0 ? (remaining < 0 ? 'text-red-700' : 'text-green-700') : 'text-gray-400 italic text-sm'}`}>
+                {budgetNum > 0 ? formatCurrency(budgetNum) : 'Não definido'}
+              </p>
+              {budgetNum > 0 && (
+                <p className={`text-xs mt-0.5 ${remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  {remaining < 0 ? `${formatCurrency(Math.abs(remaining))} acima` : `${formatCurrency(remaining)} disponível`}
+                </p>
               )}
-              {comparison.status === 'warning' && (
-                <div className="flex items-center gap-1 px-2 py-1 bg-orange-50 text-orange-700 text-xs font-medium rounded border border-orange-200">
-                  <span>⚠️</span>
-                  <span>Próximo ao Limite</span>
-                </div>
-              )}
-              {comparison.status === 'ok' && comparison.difference <= 0 && (
-                <div className="flex items-center gap-1 px-2 py-1 bg-green-50 text-green-700 text-xs font-medium rounded border border-green-200">
-                  <span>✓</span>
-                  <span>Dentro do Orçamento</span>
-                </div>
-              )}
-            </div>
+            </>
           )}
         </div>
       </div>
 
-      {/* Barra de progresso visual */}
-      {comparison && totalEstimatedCost > 0 && (
+      {/* Barra de progresso do orçamento */}
+      {budgetNum > 0 && (
         <div className="mt-3">
-          <div className="flex items-center gap-2">
-            <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
-              <div
-                className={`h-2 rounded-full transition-all ${
-                  comparison.status === 'overbudget'
-                    ? 'bg-red-600'
-                    : comparison.status === 'warning'
-                    ? 'bg-orange-500'
-                    : 'bg-green-500'
-                }`}
-                style={{
-                  width: `${Math.min((totalActualCost / totalEstimatedCost) * 100, 100)}%`
-                }}
-              />
-            </div>
-            <span className="text-xs text-gray-600 font-mono w-12 text-right">
-              {totalEstimatedCost > 0
-                ? `${Math.round((totalActualCost / totalEstimatedCost) * 100)}%`
-                : '0%'
-              }
-            </span>
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+            <span>Orçamento utilizado</span>
+            <span className="font-medium">{((totalCost / budgetNum) * 100).toFixed(1)}%</span>
           </div>
-        </div>
-      )}
-
-      {/* Detalhes adicionais (tooltip info) */}
-      {comparison && (
-        <div className="mt-2 pt-2 border-t border-gray-200">
-          <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>
-              Diferença: {comparison.difference > 0 ? '+' : ''}{formatCurrency(comparison.difference)}
-            </span>
-            <span className="text-gray-500">
-              {totalActualCost === 0
-                ? 'Nenhum recurso alocado'
-                : 'Baseado em recursos alocados'
-              }
-            </span>
+          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div
+              className={`h-2 rounded-full transition-all ${
+                totalCost > budgetNum ? 'bg-red-500' :
+                totalCost > budgetNum * 0.9 ? 'bg-orange-500' :
+                'bg-green-500'
+              }`}
+              style={{ width: `${percentUsed}%` }}
+            />
           </div>
         </div>
       )}

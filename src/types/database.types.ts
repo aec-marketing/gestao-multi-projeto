@@ -21,6 +21,7 @@ export type Database = {
           client_name: string | null      // Nome do cliente
           client_logo_url: string | null  // URL da logo do cliente
           sale_value: number | null       // Valor de venda do projeto (R$)
+          budget: number | null           // Orçamento estimado do projeto (custo esperado)
           created_at: string
           updated_at: string
         }
@@ -42,6 +43,7 @@ export type Database = {
           client_name?: string | null
           client_logo_url?: string | null
           sale_value?: number | null
+          budget?: number | null
         }
         Update: {
           id?: string
@@ -61,6 +63,7 @@ export type Database = {
           client_name?: string | null
           client_logo_url?: string | null
           sale_value?: number | null       // Valor de venda do projeto (R$)
+          budget?: number | null           // Orçamento estimado do projeto
         }
       }
       resources: {
@@ -273,3 +276,15 @@ export interface ImportPreview {
 
 // Mapa de UID do XML para ID do banco (usado durante import)
 export type UIDMap = Map<number, string>
+
+// Despesas avulsas do projeto
+export interface ProjectExpense {
+  id: string
+  project_id: string
+  description: string
+  amount: number
+  expense_date: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}

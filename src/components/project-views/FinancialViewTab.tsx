@@ -1,11 +1,11 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Project, Task, Resource } from '@/types/database.types'
+import { useMemo, useState, useEffect, useCallback } from 'react'
+import { Project, Task, Resource, ProjectExpense } from '@/types/database.types'
 import { Allocation } from '@/types/allocation.types'
-import { calculateResourceCost } from '@/utils/cost.utils'
 import { supabase } from '@/lib/supabase'
 import { dispatchToast } from '@/components/ui/ToastProvider'
+import { ProjectExpenses } from '@/components/table-view/ProjectExpenses'
 
 interface FinancialViewTabProps {
   project: Project
@@ -27,15 +27,77 @@ export default function FinancialViewTab({
   const [isEditingSaleValue, setIsEditingSaleValue] = useState(false)
   const [isSavingSaleValue, setIsSavingSaleValue] = useState(false)
 
-  // Calcular totais
-  const totalEstimated = tasks.reduce((sum, task) => sum + (task.estimated_cost || 0), 0)
-  const totalActual = tasks.reduce((sum, task) => sum + (task.actual_cost || 0), 0)
-  const difference = totalEstimated - totalActual
-  const percentExecuted = totalEstimated > 0 ? (totalActual / totalEstimated) * 100 : 0
+  // Despesas avulsas (buscadas localmente)
+  const [expenses, setExpenses] = useState<ProjectExpense[]>([])
+  const fetchExpenses = useCallback(async () => {
+    const { data } = await supabase
+      .from('project_expenses')
+      .select('*')
+      .eq('project_id', project.id)
+      .order('expense_date', { ascending: true })
+    setExpenses(data ?? [])
+  }, [project.id])
+  useEffect(() => { fetchExpenses() }, [fetchExpenses])
+
+  /**
+   * Calcula custo de alocação de uma tarefa client-side.
+   * Usa allocated_minutes (se preenchido) ou duration_minutes da task.
+   */
+  const allocationCostByTask = useMemo(() => {
+    const map = new Map<string, number>()
+    allocations.forEach(alloc => {
+      const resource = resources.find(r => r.id === alloc.resource_id)
+      const task = tasks.find(t => t.id === alloc.task_id)
+      if (!resource || !task) return
+
+      const minutes = alloc.allocated_minutes ?? task.duration_minutes ?? 0
+      const overtime = alloc.overtime_minutes ?? 0
+      const multiplier = alloc.overtime_multiplier ?? 1.5
+      const cost = (minutes / 60) * resource.hourly_rate + (overtime / 60) * resource.hourly_rate * multiplier
+
+      map.set(alloc.task_id, (map.get(alloc.task_id) ?? 0) + cost)
+    })
+    return map
+  }, [allocations, resources, tasks])
+
+  // IDs de tarefas que têm filhas — calculado antes dos memos que dependem dele
+  const parentIdsSet = useMemo(
+    () => new Set(tasks.map(t => t.parent_id).filter(Boolean) as string[]),
+    [tasks]
+  )
+
+  // Custo total das tarefas — apenas folhas (evita double-counting de pais)
+  const totalEstimated = useMemo(
+    () => tasks
+      .filter(t => !parentIdsSet.has(t.id))
+      .reduce((sum, t) => sum + (t.estimated_cost || 0), 0),
+    [tasks, parentIdsSet]
+  )
+
+  // Custo total por alocação — calculado client-side a partir de hourly_rate * minutos
+  const totalAllocationCost = useMemo(
+    () => Array.from(allocationCostByTask.values()).reduce((sum, v) => sum + v, 0),
+    [allocationCostByTask]
+  )
+
+  // Custo total = custo das tarefas + custo por alocação + despesas avulsas
+  const totalExpenses = useMemo(() => expenses.reduce((sum, e) => sum + e.amount, 0), [expenses])
+  const totalCost = totalEstimated + totalAllocationCost + totalExpenses
+
+  // "Estouro/Economia" compara custo total com o orçamento definido
+  const budgetNum = project.budget ?? 0
+  const budgetDiff = budgetNum > 0 ? budgetNum - totalCost : null
+  // % executado: média de progresso ponderada pelo custo da tarefa (ou simples se sem custo)
+  const percentExecuted = useMemo(() => {
+    const leafTasks = tasks.filter(t => !tasks.some(other => other.parent_id === t.id))
+    if (leafTasks.length === 0) return 0
+    const total = leafTasks.reduce((sum, t) => sum + (t.progress ?? 0), 0)
+    return total / leafTasks.length
+  }, [tasks])
 
   // ONDA 5.7: Calcular margem de lucro
   const saleValueNum = parseFloat(saleValue) || 0
-  const profitMargin = saleValueNum - totalEstimated
+  const profitMargin = saleValueNum - totalCost
   const profitMarginPercent = saleValueNum > 0 ? (profitMargin / saleValueNum) * 100 : 0
 
   // ONDA 5.7: Handler para salvar valor de venda
@@ -140,31 +202,25 @@ export default function FinancialViewTab({
       .sort((a, b) => b.overtimeCost - a.overtimeCost)
   }, [tasks, allocations, resources])
 
-  // ONDA 3: Tarefas que estouraram orçamento
+  // Tarefas folha onde custo por alocação supera o custo estimado da tarefa
   const budgetAlerts = useMemo(() => {
     return tasks
+      .filter(task => !parentIdsSet.has(task.id))
       .filter(task => {
         const estimated = task.estimated_cost || 0
-        const actual = task.actual_cost || 0
-        return actual > estimated && estimated > 0
+        const allocCost = allocationCostByTask.get(task.id) ?? 0
+        return allocCost > estimated && estimated > 0
       })
       .map(task => {
         const estimated = task.estimated_cost || 0
-        const actual = task.actual_cost || 0
-        const overrun = actual - estimated
+        const allocCost = allocationCostByTask.get(task.id) ?? 0
+        const overrun = allocCost - estimated
         const overrunPercent = (overrun / estimated) * 100
-
-        return {
-          task,
-          estimated,
-          actual,
-          overrun,
-          overrunPercent
-        }
+        return { task, estimated, allocCost, overrun, overrunPercent }
       })
       .sort((a, b) => b.overrunPercent - a.overrunPercent)
-      .slice(0, 10) // Top 10
-  }, [tasks])
+      .slice(0, 10)
+  }, [tasks, allocationCostByTask])
 
   // ONDA 3: Total de hora extra
   const totalOvertimeCost = overtimeTasks.reduce((sum, t) => sum + t.overtimeCost, 0)
@@ -175,28 +231,21 @@ export default function FinancialViewTab({
     return `R$ ${value.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`
   }
 
-  // Calcular custos por tipo de tarefa (apenas tarefas principais)
-  const costsByType = tasks
-    .filter(t => !t.parent_id) // Apenas principais
-    .reduce((acc, task) => {
-      const type = task.type
-      const cost = task.actual_cost || task.estimated_cost || 0
-      
-      if (!acc[type]) {
-        acc[type] = { estimated: 0, actual: 0 }
-      }
-      
-      acc[type].estimated += task.estimated_cost || 0
-      acc[type].actual += task.actual_cost || 0
-      
-      return acc
-    }, {} as Record<string, { estimated: number; actual: number }>)
 
-  // Top 5 tarefas mais caras
-  const topTasks = [...tasks]
-    .filter(t => !t.parent_id) // Apenas principais
-    .sort((a, b) => (b.actual_cost || b.estimated_cost || 0) - (a.actual_cost || a.estimated_cost || 0))
-    .slice(0, 5)
+
+  // Top 5 tarefas mais caras — tarefas folha, ordenadas por custo total
+  const topTasks = useMemo(() => {
+    return [...tasks]
+      .filter(t => !parentIdsSet.has(t.id))  // apenas folhas
+      .map(t => ({
+        task: t,
+        taskCost: t.estimated_cost || 0,
+        allocCost: allocationCostByTask.get(t.id) ?? 0,
+        total: (t.estimated_cost || 0) + (allocationCostByTask.get(t.id) ?? 0)
+      }))
+      .filter(item => item.total > 0)
+      .sort((a, b) => b.total - a.total)
+  }, [tasks, allocationCostByTask, parentIdsSet])
 
   return (
     <div className="space-y-6">
@@ -271,14 +320,14 @@ export default function FinancialViewTab({
             </p>
           </div>
 
-          {/* Valor Total Estimado (read-only) */}
+          {/* Custo Total do Projeto (read-only) */}
           <div className="bg-white rounded-lg border-2 border-green-300 p-4">
-            <p className="text-sm font-medium text-green-900 mb-2">Custo Total Estimado</p>
+            <p className="text-sm font-medium text-green-900 mb-2">Custo Total do Projeto</p>
             <p className="text-2xl font-bold text-green-700">
-              {formatCurrency(totalEstimated)}
+              {formatCurrency(totalCost)}
             </p>
             <p className="text-xs text-gray-500 mt-2">
-              Soma de todos os custos estimados das tarefas
+              Tarefas + alocações + despesas avulsas
             </p>
           </div>
 
@@ -324,10 +373,10 @@ export default function FinancialViewTab({
             <div className="h-6 bg-gray-200 rounded-full overflow-hidden flex">
               <div
                 className="bg-green-500 flex items-center justify-center text-white text-xs font-medium"
-                style={{ width: `${(totalEstimated / saleValueNum) * 100}%` }}
-                title={`Custo: ${formatCurrency(totalEstimated)}`}
+                style={{ width: `${Math.min((totalCost / saleValueNum) * 100, 100)}%` }}
+                title={`Custo: ${formatCurrency(totalCost)}`}
               >
-                {((totalEstimated / saleValueNum) * 100) > 15 && 'Custo'}
+                {((totalCost / saleValueNum) * 100) > 15 && 'Custo'}
               </div>
               <div
                 className={`flex items-center justify-center text-white text-xs font-medium ${
@@ -345,11 +394,11 @@ export default function FinancialViewTab({
 
       {/* Cards de Resumo */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {/* Custo Estimado Total */}
+        {/* Custo das Tarefas */}
         <div className="bg-white rounded-lg border p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600 mb-1">Custo Estimado</p>
+              <p className="text-sm text-gray-600 mb-1">Custo das Tarefas</p>
               <p className="text-2xl font-bold text-green-700">
                 {formatCurrency(totalEstimated)}
               </p>
@@ -360,36 +409,43 @@ export default function FinancialViewTab({
           </div>
         </div>
 
-        {/* Custo Real Total */}
+        {/* Custo por Alocação */}
         <div className="bg-white rounded-lg border p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600 mb-1">Custo Real</p>
+              <p className="text-sm text-gray-600 mb-1">Custo por Alocação</p>
               <p className="text-2xl font-bold text-blue-700">
-                {formatCurrency(totalActual)}
+                {formatCurrency(totalAllocationCost)}
               </p>
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-              <span className="text-2xl">💰</span>
+              <span className="text-2xl">👥</span>
             </div>
           </div>
         </div>
 
-        {/* Diferença */}
+        {/* Orçamento vs Custo Total */}
         <div className="bg-white rounded-lg border p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600 mb-1">
-                {difference >= 0 ? 'Economia' : 'Estouro'}
+                {budgetDiff === null ? 'Orçamento' : budgetDiff >= 0 ? 'Disponível' : 'Estouro'}
               </p>
-              <p className={`text-2xl font-bold ${difference >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {formatCurrency(Math.abs(difference))}
+              <p className={`text-2xl font-bold ${
+                budgetDiff === null ? 'text-gray-400' :
+                budgetDiff >= 0 ? 'text-green-700' : 'text-red-700'
+              }`}>
+                {budgetDiff === null ? '—' : formatCurrency(Math.abs(budgetDiff))}
               </p>
+              {budgetDiff === null && (
+                <p className="text-xs text-gray-400">Defina orçamento na aba Tabela</p>
+              )}
             </div>
             <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-              difference >= 0 ? 'bg-green-100' : 'bg-red-100'
+              budgetDiff === null ? 'bg-gray-100' :
+              budgetDiff >= 0 ? 'bg-green-100' : 'bg-red-100'
             }`}>
-              <span className="text-2xl">{difference >= 0 ? '✅' : '⚠️'}</span>
+              <span className="text-2xl">{budgetDiff === null ? '💼' : budgetDiff >= 0 ? '✅' : '⚠️'}</span>
             </div>
           </div>
         </div>
@@ -543,95 +599,49 @@ export default function FinancialViewTab({
         )}
       </div>
 
-      {/* Custos por Tipo */}
+      {/* Custos por Tarefa */}
       <div className="bg-white rounded-lg border p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          💼 Custos por Tipo de Tarefa
+          🏆 Custos por Tarefa
         </h3>
-        
-        <div className="space-y-3">
-          {Object.entries(costsByType).map(([type, costs]) => {
-            const total = costs.actual || costs.estimated
-            const percentage = totalActual > 0 ? (costs.actual / totalActual) * 100 : 0
-            
-            return (
-              <div key={type} className="border-b pb-3 last:border-b-0">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium text-gray-700">
-                    {type.replace(/_/g, ' ').toUpperCase()}
-                  </span>
-                  <span className="text-sm font-bold text-gray-900">
-                    {formatCurrency(total)}
-                  </span>
-                </div>
-                
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-blue-600 h-2 rounded-full transition-all"
-                      style={{ width: `${percentage}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-500 w-12 text-right">
-                    {percentage.toFixed(1)}%
-                  </span>
-                </div>
-                
-                <div className="flex items-center justify-between mt-1 text-xs text-gray-500">
-                  <span>Est: {formatCurrency(costs.estimated)}</span>
-                  <span>Real: {formatCurrency(costs.actual)}</span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
 
-      {/* Top 5 Tarefas Mais Caras */}
-      <div className="bg-white rounded-lg border p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          🏆 Top 5 Tarefas Mais Caras
-        </h3>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">#</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tarefa</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tipo</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Estimado</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Real</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Diferença</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {topTasks.map((task, index) => {
-                const diff = (task.estimated_cost || 0) - (task.actual_cost || 0)
-                return (
-                  <tr key={task.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm text-gray-900">{index + 1}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 font-medium">{task.name}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {task.type.replace(/_/g, ' ')}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-green-700">
-                      {formatCurrency(task.estimated_cost || 0)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-right text-blue-700">
-                      {formatCurrency(task.actual_cost || 0)}
-                    </td>
-                    <td className={`px-4 py-3 text-sm text-right font-medium ${
-                      diff >= 0 ? 'text-green-700' : 'text-red-700'
-                    }`}>
-                      {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        {topTasks.length === 0 ? (
+          <p className="text-sm text-gray-400 italic">Nenhuma tarefa com custo cadastrado.</p>
+        ) : (
+          <div className="space-y-2">
+            {topTasks.map((item) => {
+              const grandTotal = totalEstimated + totalAllocationCost
+              const percentage = grandTotal > 0 ? (item.total / grandTotal) * 100 : 0
+              return (
+                <div key={item.task.id} className="border-b pb-2 last:border-b-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium text-gray-800 truncate max-w-[55%]" title={item.task.name}>
+                      {item.task.name}
+                    </span>
+                    <span className="text-sm font-bold text-gray-900">
+                      {formatCurrency(item.total)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+                      <div
+                        className="bg-blue-500 h-1.5 rounded-full transition-all"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                    <span className="text-xs text-gray-400 w-10 text-right">{percentage.toFixed(1)}%</span>
+                  </div>
+                  {(item.taskCost > 0 || item.allocCost > 0) && (
+                    <div className="flex gap-3 mt-0.5 text-xs text-gray-400">
+                      {item.taskCost > 0 && <span>Tarefa: {formatCurrency(item.taskCost)}</span>}
+                      {item.allocCost > 0 && <span className="text-purple-500">Alocação: {formatCurrency(item.allocCost)}</span>}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* ONDA 3: Tarefas com Hora Extra */}
@@ -694,8 +704,8 @@ export default function FinancialViewTab({
               <thead className="bg-orange-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Tarefa</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Estimado</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Real</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Custo</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Por Alocação</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Estouro</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">% Acima</th>
                 </tr>
@@ -708,7 +718,7 @@ export default function FinancialViewTab({
                       {formatCurrency(alert.estimated)}
                     </td>
                     <td className="px-4 py-3 text-sm text-right text-red-700 font-bold">
-                      {formatCurrency(alert.actual)}
+                      {formatCurrency(alert.allocCost)}
                     </td>
                     <td className="px-4 py-3 text-sm text-right text-orange-700 font-bold">
                       {formatCurrency(alert.overrun)}
@@ -740,6 +750,13 @@ export default function FinancialViewTab({
           </div>
         </div>
       )}
+
+      {/* Despesas Avulsas */}
+      <ProjectExpenses
+        projectId={project.id}
+        expenses={expenses}
+        onExpensesChanged={fetchExpenses}
+      />
     </div>
   )
 }

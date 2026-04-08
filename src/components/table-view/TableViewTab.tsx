@@ -194,7 +194,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
   const updateTaskMutation = useUpdateTask(project.id)
 
   // ==================== CALCULATIONS ====================
-  const { calculateTotalCost } = useTaskCalculations(tasks)
+  const { calculateTotalCost, allocationCostByTask } = useTaskCalculations(tasks, allocations, resources)
 
   // ==================== UI STATE ====================
   const [isAddingTask, setIsAddingTask] = useState(false)
@@ -254,13 +254,13 @@ export default function TableViewTab({ project }: TableViewTabProps) {
   // ==================== FILTERED TASKS ====================
   const filteredMainTasks = filterAndSort(mainTasks)
 
-  // ==================== COST TOTALS (ONDA 1) ====================
+  // ==================== COST TOTALS ====================
+  // Soma apenas folhas para evitar double-counting de tarefas pai
   const totalEstimatedCost = React.useMemo(() => {
-    return tasks.reduce((sum, task) => sum + (task.estimated_cost || 0), 0)
-  }, [tasks])
-
-  const totalActualCost = React.useMemo(() => {
-    return tasks.reduce((sum, task) => sum + (task.actual_cost || 0), 0)
+    const parentIdSet = new Set(tasks.map(t => t.parent_id).filter(Boolean) as string[])
+    return tasks
+      .filter(t => !parentIdSet.has(t.id))
+      .reduce((sum, t) => sum + (t.estimated_cost || 0), 0)
   }, [tasks])
 
   // ==================== HANDLERS ====================
@@ -791,11 +791,14 @@ export default function TableViewTab({ project }: TableViewTabProps) {
           onAddPurchaseList={() => setIsPurchaseListModalOpen(true)}
         />
 
-        {/* ONDA 1: Resumo de Custos */}
+        {/* Resumo de Custos */}
         <div className="px-4 pt-4">
           <ProjectCostSummary
-            totalEstimatedCost={totalEstimatedCost}
-            totalActualCost={totalActualCost}
+            projectId={project.id}
+            budget={project.budget ?? null}
+            totalTaskCost={totalEstimatedCost}
+            totalExpenses={0}
+            onBudgetSaved={() => queryClient.invalidateQueries({ queryKey: queryKeys.projects.detail(project.id) })}
           />
         </div>
 

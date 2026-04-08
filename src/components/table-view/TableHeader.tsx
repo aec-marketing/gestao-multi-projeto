@@ -35,10 +35,7 @@ export const TableHeader = React.memo(function TableHeader() {
           Progresso
         </th>
         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
-          Custo Est.
-        </th>
-        <th className="px-4 py-3 text-center text-xs font-medium text-gray-700 uppercase tracking-wider" title="Custo real baseado em recursos alocados (comparado com estimado)">
-          Custo Real 💰
+          Custo 💰
         </th>
         <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
           Ações
