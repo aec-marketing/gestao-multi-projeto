@@ -34,6 +34,7 @@ interface TaskRowProps {
   onCancelSubtask: () => void
   isSavingSubtask: boolean
   onCloseSubtasks: (taskId: string, taskName: string, subtaskCount: number) => void
+  onEditList?: (taskId: string) => void
 }
 
 /**
@@ -61,7 +62,8 @@ export const TaskRow = React.memo(function TaskRow({
   onSaveSubtask,
   onCancelSubtask,
   isSavingSubtask,
-  onCloseSubtasks
+  onCloseSubtasks,
+  onEditList
 }: TaskRowProps) {
   // Subtasks
   const subtasks = useMemo(
@@ -376,8 +378,10 @@ export const TaskRow = React.memo(function TaskRow({
             taskId={task.id}
             taskName={task.name}
             hasSubtasks={hasSubtasks}
+            isPurchaseList={task.type === 'lista_compras'}
             onAddSubtask={onAddSubtask}
             onDelete={onDelete}
+            onEditList={onEditList}
           />
         </td>
       </tr>
@@ -423,6 +427,7 @@ export const TaskRow = React.memo(function TaskRow({
           onCancelSubtask={onCancelSubtask}
           isSavingSubtask={isSavingSubtask}
           onCloseSubtasks={onCloseSubtasks}
+          onEditList={onEditList}
         />
       ))}
     </>

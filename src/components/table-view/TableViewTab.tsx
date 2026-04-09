@@ -247,9 +247,24 @@ export default function TableViewTab({ project }: TableViewTabProps) {
     allocationId?: string  // ONDA 3: ID da alocação para edição (opcional)
   } | null>(null)
 
-  // Purchase List Modal state
+  // Purchase List Modal state (criação)
   const [isPurchaseListModalOpen, setIsPurchaseListModalOpen] = useState(false)
   const [isPurchaseListSaving, setIsPurchaseListSaving] = useState(false)
+
+  // Purchase List Modal state (edição)
+  const [editListModal, setEditListModal] = useState<{
+    listId: string
+    listName: string
+    startDate: string
+    items: {
+      id: string
+      name: string
+      vendor: string
+      durationDays: number
+      estimatedCost: number
+      progress: number
+    }[]
+  } | null>(null)
 
   // ==================== FILTERED TASKS ====================
   const filteredMainTasks = filterAndSort(mainTasks)
@@ -648,6 +663,151 @@ export default function TableViewTab({ project }: TableViewTabProps) {
 
   /**
    * Handler para criar lista de compras
+   * Abre o modal de edição de uma lista de compras existente.
+   * Carrega os itens a partir das subtarefas já em memória.
+   */
+  const handleEditList = useCallback((listId: string) => {
+    const listTask = tasks.find(t => t.id === listId)
+    if (!listTask) return
+
+    const items = tasks
+      .filter(t => t.parent_id === listId)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map(t => {
+        // nome real = antes do " — " (fornecedor foi concatenado ao criar)
+        const separatorIndex = t.name.lastIndexOf(' — ')
+        const name = separatorIndex > 0 ? t.name.slice(0, separatorIndex) : t.name
+        const vendor = separatorIndex > 0 ? t.name.slice(separatorIndex + 3) : ''
+        const durationDays = Math.round((t.duration_minutes ?? 1440) / 1440)
+        return {
+          id: t.id,
+          name,
+          vendor,
+          durationDays: Math.max(1, durationDays),
+          estimatedCost: t.estimated_cost ?? 0,
+          progress: t.progress ?? 0,
+        }
+      })
+
+    setEditListModal({
+      listId,
+      listName: listTask.name,
+      startDate: listTask.start_date ?? new Date().toISOString().split('T')[0],
+      items,
+    })
+  }, [tasks])
+
+  /**
+   * Salva as alterações da lista de compras editada:
+   * - UPDATE nos itens existentes (nome, fornecedor, prazo, custo)
+   * - INSERT nos itens novos (sem id)
+   * - DELETE nos itens removidos (ids em removedIds)
+   * - UPDATE na tarefa pai (nome, data, duração recalculada)
+   */
+  const handleSaveEditedList = useCallback(async (data: PurchaseListData) => {
+    if (!editListModal) return
+    setIsPurchaseListSaving(true)
+    try {
+      const { listName, startDate, items, removedIds = [] } = data
+      const { listId } = editListModal
+
+      // 1. Deletar itens removidos
+      if (removedIds.length > 0) {
+        const { error } = await supabase.from('tasks').delete().in('id', removedIds)
+        if (error) throw error
+      }
+
+      // 2. Atualizar itens existentes
+      const existingItems = items.filter(item => item.id)
+      for (const item of existingItems) {
+        const endDateObj = new Date(startDate + 'T00:00:00')
+        endDateObj.setDate(endDateObj.getDate() + item.durationDays - 1)
+        const endDate = endDateObj.toISOString().split('T')[0]
+        const taskName = item.vendor ? `${item.name} — ${item.vendor}` : item.name.trim()
+
+        const { error } = await supabase
+          .from('tasks')
+          .update({
+            name: taskName,
+            duration_minutes: item.durationDays * 1440,
+            start_date: startDate,
+            end_date: endDate,
+            estimated_cost: item.estimatedCost,
+          })
+          .eq('id', item.id)
+        if (error) throw error
+      }
+
+      // 3. Inserir itens novos
+      const newItems = items.filter(item => !item.id)
+      if (newItems.length > 0) {
+        const maxSortOrder = tasks.length > 0
+          ? Math.max(...tasks.map(t => t.sort_order || 0))
+          : 0
+
+        const subtasks = newItems.map((item, i) => {
+          const endDateObj = new Date(startDate + 'T00:00:00')
+          endDateObj.setDate(endDateObj.getDate() + item.durationDays - 1)
+          const endDate = endDateObj.toISOString().split('T')[0]
+          const taskName = item.vendor ? `${item.name} — ${item.vendor}` : item.name.trim()
+
+          return {
+            name: taskName,
+            type: 'subtarefa' as const,
+            project_id: project.id,
+            duration_minutes: item.durationDays * 1440,
+            work_type: 'wait' as const,
+            progress: 0,
+            sort_order: maxSortOrder + 2 + i,
+            parent_id: listId,
+            outline_level: 1,
+            start_date: startDate,
+            end_date: endDate,
+            is_optional: false,
+            is_critical_path: false,
+            estimated_cost: item.estimatedCost || 0,
+          }
+        })
+
+        const { error } = await supabase.from('tasks').insert(subtasks)
+        if (error) throw error
+      }
+
+      // 4. Atualizar tarefa pai (nome, datas, duração = span dos itens)
+      const allItems = items.filter(item => !removedIds.includes(item.id ?? ''))
+      const latestEnd = allItems.reduce((latest, item) => {
+        const endDate = new Date(startDate + 'T00:00:00')
+        endDate.setDate(endDate.getDate() + item.durationDays - 1)
+        return endDate > latest ? endDate : latest
+      }, new Date(startDate + 'T00:00:00'))
+
+      const spanDays = Math.round(
+        (latestEnd.getTime() - new Date(startDate + 'T00:00:00').getTime()) / (1000 * 60 * 60 * 24)
+      ) + 1
+
+      const { error: parentError } = await supabase
+        .from('tasks')
+        .update({
+          name: listName,
+          start_date: startDate,
+          end_date: latestEnd.toISOString().split('T')[0],
+          duration_minutes: spanDays * 1440,
+        })
+        .eq('id', listId)
+      if (parentError) throw parentError
+
+      await queryClient.invalidateQueries({ queryKey: queryKeys.tasks.byProject(project.id) })
+      dispatchToast('Lista atualizada com sucesso', 'success')
+      setEditListModal(null)
+    } catch (error) {
+      console.error('Erro ao salvar lista:', error)
+      dispatchToast('Erro ao salvar lista de compras', 'error')
+    } finally {
+      setIsPurchaseListSaving(false)
+    }
+  }, [editListModal, tasks, project.id, queryClient])
+
+  /**
    * Cria uma tarefa pai do tipo 'lista_compras' com work_type 'wait' (dias corridos)
    * e cada item como uma subtarefa — usa supabase direto para evitar toasts por inserção
    */
@@ -870,6 +1030,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
                     onCancelSubtask={handleCancelCreateSubtask}
                     isSavingSubtask={createTaskMutation.isPending && addingSubtaskTo !== null}
                     onCloseSubtasks={handleCloseSubtasks}
+                    onEditList={handleEditList}
                   />
                 ))}
               </tbody>
@@ -886,7 +1047,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
         isSaving={batchUpdateMutation.isPending}
       />
 
-      {/* Purchase List Modal */}
+      {/* Purchase List Modal — criação */}
       <PurchaseListModal
         project={project}
         isOpen={isPurchaseListModalOpen}
@@ -894,6 +1055,22 @@ export default function TableViewTab({ project }: TableViewTabProps) {
         onConfirm={handleCreatePurchaseList}
         isLoading={isPurchaseListSaving}
       />
+
+      {/* Purchase List Modal — edição */}
+      {editListModal && (
+        <PurchaseListModal
+          project={project}
+          isOpen={true}
+          onClose={() => setEditListModal(null)}
+          onConfirm={handleSaveEditedList}
+          isLoading={isPurchaseListSaving}
+          editMode={true}
+          editListId={editListModal.listId}
+          editListName={editListModal.listName}
+          editStartDate={editListModal.startDate}
+          editItems={editListModal.items}
+        />
+      )}
 
       {/* Allocation Modal (ONDA 3: Com suporte a edição) */}
       {allocationModal && allocationModal.isOpen && (() => {

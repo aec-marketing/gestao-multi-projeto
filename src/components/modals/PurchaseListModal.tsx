@@ -1,13 +1,15 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Project } from '@/types/database.types'
 
 interface PurchaseItem {
+  id?: string          // undefined = item novo; definido = item existente no banco
   name: string
   vendor: string
   durationDays: number
   estimatedCost: number
+  progress?: number    // somente leitura — exibido para avisar o usuário
 }
 
 interface PurchaseListModalProps {
@@ -16,12 +18,20 @@ interface PurchaseListModalProps {
   onClose: () => void
   onConfirm: (data: PurchaseListData) => Promise<void>
   isLoading?: boolean
+  // Modo edição
+  editMode?: boolean
+  editListId?: string        // ID da tarefa pai (lista_compras)
+  editListName?: string
+  editStartDate?: string
+  editItems?: PurchaseItem[] // itens existentes pré-carregados
 }
 
 export interface PurchaseListData {
   listName: string
   startDate: string
   items: PurchaseItem[]
+  // em modo edit, também informa quais IDs foram removidos
+  removedIds?: string[]
 }
 
 const EMPTY_ITEM: PurchaseItem = {
@@ -37,12 +47,34 @@ export function PurchaseListModal({
   onClose,
   onConfirm,
   isLoading = false,
+  editMode = false,
+  editListId,
+  editListName = '',
+  editStartDate,
+  editItems = [],
 }: PurchaseListModalProps) {
+  const defaultDate = project.start_date || new Date().toISOString().split('T')[0]
+
   const [listName, setListName] = useState('')
-  const [startDate, setStartDate] = useState(
-    project.start_date || new Date().toISOString().split('T')[0]
-  )
+  const [startDate, setStartDate] = useState(defaultDate)
   const [items, setItems] = useState<PurchaseItem[]>([{ ...EMPTY_ITEM }])
+  const [removedIds, setRemovedIds] = useState<string[]>([])
+
+  // Sincronizar estado quando props de edição mudam (ao abrir o modal)
+  useEffect(() => {
+    if (!isOpen) return
+    if (editMode) {
+      setListName(editListName)
+      setStartDate(editStartDate || defaultDate)
+      setItems(editItems.length > 0 ? editItems : [{ ...EMPTY_ITEM }])
+      setRemovedIds([])
+    } else {
+      setListName('')
+      setStartDate(defaultDate)
+      setItems([{ ...EMPTY_ITEM }])
+      setRemovedIds([])
+    }
+  }, [isOpen, editMode])
 
   if (!isOpen) return null
 
@@ -51,6 +83,11 @@ export function PurchaseListModal({
   }
 
   const handleRemoveItem = (index: number) => {
+    const item = items[index]
+    if (item.id) {
+      // registrar para deleção no banco
+      setRemovedIds(prev => [...prev, item.id!])
+    }
     setItems(prev => prev.filter((_, i) => i !== index))
   }
 
@@ -61,11 +98,13 @@ export function PurchaseListModal({
   }
 
   const handleConfirm = async () => {
-    await onConfirm({ listName, startDate, items })
-    // Reset form on success
-    setListName('')
-    setStartDate(project.start_date || new Date().toISOString().split('T')[0])
-    setItems([{ ...EMPTY_ITEM }])
+    await onConfirm({ listName, startDate, items, removedIds })
+    if (!editMode) {
+      setListName('')
+      setStartDate(defaultDate)
+      setItems([{ ...EMPTY_ITEM }])
+      setRemovedIds([])
+    }
   }
 
   const isValid = listName.trim() !== '' && items.every(item => item.name.trim() !== '')
@@ -79,8 +118,14 @@ export function PurchaseListModal({
             🛒
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Nova Lista de Compras</h3>
-            <p className="text-sm text-gray-500">Crie uma lista de itens a comprar/contratar para o projeto</p>
+            <h3 className="text-lg font-semibold text-gray-900">
+              {editMode ? 'Editar Lista de Compras' : 'Nova Lista de Compras'}
+            </h3>
+            <p className="text-sm text-gray-500">
+              {editMode
+                ? 'Adicione, edite ou remova itens da lista existente'
+                : 'Crie uma lista de itens a comprar/contratar para o projeto'}
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -134,7 +179,7 @@ export function PurchaseListModal({
               <span className="text-xs text-gray-400">{items.length} item(ns)</span>
             </div>
 
-            {/* Cabeçalho da tabela de itens */}
+            {/* Cabeçalho */}
             <div className="grid grid-cols-12 gap-2 mb-1 px-2">
               <span className="col-span-4 text-xs text-gray-500 font-medium">Item / Descrição</span>
               <span className="col-span-3 text-xs text-gray-500 font-medium">Fornecedor</span>
@@ -144,64 +189,81 @@ export function PurchaseListModal({
             </div>
 
             <div className="space-y-2">
-              {items.map((item, index) => (
-                <div key={index} className="grid grid-cols-12 gap-2 items-center bg-gray-50 rounded-lg p-2">
-                  <div className="col-span-4">
-                    <input
-                      type="text"
-                      value={item.name}
-                      onChange={e => handleItemChange(index, 'name', e.target.value)}
-                      placeholder="Nome do item"
-                      className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-900 bg-white focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
-                      disabled={isLoading}
-                    />
+              {items.map((item, index) => {
+                const isExisting = Boolean(item.id)
+                const hasProgress = (item.progress ?? 0) > 0
+                return (
+                  <div
+                    key={item.id ?? `new-${index}`}
+                    className={`grid grid-cols-12 gap-2 items-center rounded-lg p-2 ${
+                      isExisting ? 'bg-gray-50' : 'bg-orange-50 border border-orange-200'
+                    }`}
+                  >
+                    <div className="col-span-4">
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="text"
+                          value={item.name}
+                          onChange={e => handleItemChange(index, 'name', e.target.value)}
+                          placeholder="Nome do item"
+                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-900 bg-white focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
+                          disabled={isLoading}
+                        />
+                      </div>
+                      {!isExisting && (
+                        <span className="text-[10px] text-orange-500 font-medium ml-0.5">novo</span>
+                      )}
+                      {isExisting && hasProgress && (
+                        <span className="text-[10px] text-blue-500 font-medium ml-0.5">{item.progress}% concluído</span>
+                      )}
+                    </div>
+                    <div className="col-span-3">
+                      <input
+                        type="text"
+                        value={item.vendor}
+                        onChange={e => handleItemChange(index, 'vendor', e.target.value)}
+                        placeholder="Fornecedor"
+                        className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-900 bg-white focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
+                        disabled={isLoading}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        value={item.durationDays}
+                        onChange={e => handleItemChange(index, 'durationDays', Math.max(1, parseInt(e.target.value) || 1))}
+                        min={1}
+                        className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-center focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
+                        disabled={isLoading}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        value={item.estimatedCost || ''}
+                        onChange={e => handleItemChange(index, 'estimatedCost', parseFloat(e.target.value) || 0)}
+                        min={0}
+                        step={0.01}
+                        placeholder="0,00"
+                        className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-right focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
+                        disabled={isLoading}
+                      />
+                    </div>
+                    <div className="col-span-1 flex justify-center">
+                      <button
+                        onClick={() => handleRemoveItem(index)}
+                        disabled={isLoading || (hasProgress && isExisting)}
+                        className="text-gray-400 hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        title={hasProgress && isExisting ? 'Item com progresso não pode ser removido' : 'Remover item'}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
-                  <div className="col-span-3">
-                    <input
-                      type="text"
-                      value={item.vendor}
-                      onChange={e => handleItemChange(index, 'vendor', e.target.value)}
-                      placeholder="Fornecedor"
-                      className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-900 bg-white focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
-                      disabled={isLoading}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      value={item.durationDays}
-                      onChange={e => handleItemChange(index, 'durationDays', Math.max(1, parseInt(e.target.value) || 1))}
-                      min={1}
-                      className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-center focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                      disabled={isLoading}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <input
-                      type="number"
-                      value={item.estimatedCost || ''}
-                      onChange={e => handleItemChange(index, 'estimatedCost', parseFloat(e.target.value) || 0)}
-                      min={0}
-                      step={0.01}
-                      placeholder="0,00"
-                      className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-right focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                      disabled={isLoading}
-                    />
-                  </div>
-                  <div className="col-span-1 flex justify-center">
-                    <button
-                      onClick={() => handleRemoveItem(index)}
-                      disabled={items.length <= 1 || isLoading}
-                      className="text-gray-400 hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                      title="Remover item"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             <button
@@ -215,8 +277,9 @@ export function PurchaseListModal({
 
           {/* Info */}
           <p className="text-xs text-gray-400 bg-gray-50 rounded p-3">
-            Cada item será criado como uma subtarefa com prazo em dias corridos (incluindo fins de semana).
-            {'O campo "Fornecedor" é apenas informativo e pode ser preenchido depois.'}
+            {editMode
+              ? 'Itens existentes serão atualizados. Itens com progresso registrado não podem ser removidos. Novos itens (fundo laranja) serão adicionados à lista.'
+              : 'Cada item será criado como uma subtarefa com prazo em dias corridos (incluindo fins de semana). O campo "Fornecedor" é apenas informativo e pode ser preenchido depois.'}
           </p>
         </div>
 
@@ -237,10 +300,10 @@ export function PurchaseListModal({
             {isLoading ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                Criando...
+                {editMode ? 'Salvando...' : 'Criando...'}
               </>
             ) : (
-              'Criar Lista de Compras'
+              editMode ? 'Salvar alterações' : 'Criar Lista de Compras'
             )}
           </button>
         </div>

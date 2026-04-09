@@ -1,6 +1,6 @@
 /**
  * Card de resumo de custos do projeto
- * Mostra: custo das tarefas + despesas avulsas + orçamento editável + margem
+ * Mostra: custo das tarefas + despesas avulsas + gasto previsto editável + margem
  */
 
 'use client'
@@ -12,7 +12,7 @@ import { dispatchToast } from '@/components/ui/ToastProvider'
 
 interface ProjectCostSummaryProps {
   projectId: string
-  budget: number | null          // Orçamento estimado do projeto
+  budget: number | null          // Gasto Previsto estimado do projeto
   totalTaskCost: number          // Soma de estimated_cost das tarefas
   totalExpenses: number          // Soma das despesas avulsas
   onBudgetSaved: () => void      // Callback para invalidar cache após salvar
@@ -44,9 +44,9 @@ export function ProjectCostSummary({
 
     setIsSaving(false)
     if (error) {
-      dispatchToast('Erro ao salvar orçamento', 'error')
+      dispatchToast('Erro ao salvar gasto previsto', 'error')
     } else {
-      dispatchToast('Orçamento salvo', 'success')
+      dispatchToast('Gasto Previsto salvo', 'success')
       setIsEditing(false)
       onBudgetSaved()
     }
@@ -77,11 +77,11 @@ export function ProjectCostSummary({
           <p className="text-lg font-bold text-blue-800">{formatCurrency(totalCost)}</p>
         </div>
 
-        {/* Orçamento editável */}
+        {/* Gasto Previsto editável */}
         <div className={`rounded-lg p-3 ${budgetNum > 0 ? (remaining < 0 ? 'bg-red-50' : 'bg-green-50') : 'bg-gray-50'}`}>
           <div className="flex items-center justify-between mb-1">
             <p className={`text-xs uppercase tracking-wide ${budgetNum > 0 ? (remaining < 0 ? 'text-red-600' : 'text-green-600') : 'text-gray-500'}`}>
-              Orçamento
+              Gasto Previsto
             </p>
             {!isEditing && (
               <button
@@ -135,11 +135,11 @@ export function ProjectCostSummary({
         </div>
       </div>
 
-      {/* Barra de progresso do orçamento */}
+      {/* Barra de progresso do gasto previsto */}
       {budgetNum > 0 && (
         <div className="mt-3">
           <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-            <span>Orçamento utilizado</span>
+            <span>Gasto Previsto utilizado</span>
             <span className="font-medium">{((totalCost / budgetNum) * 100).toFixed(1)}%</span>
           </div>
           <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">

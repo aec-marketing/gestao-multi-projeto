@@ -84,7 +84,7 @@ export default function FinancialViewTab({
   const totalExpenses = useMemo(() => expenses.reduce((sum, e) => sum + e.amount, 0), [expenses])
   const totalCost = totalEstimated + totalAllocationCost + totalExpenses
 
-  // "Estouro/Economia" compara custo total com o orçamento definido
+  // "Estouro/Economia" compara custo total com o gasto previsto definido
   const budgetNum = project.budget ?? 0
   const budgetDiff = budgetNum > 0 ? budgetNum - totalCost : null
   // % executado: média de progresso ponderada pelo custo da tarefa (ou simples se sem custo)
@@ -424,12 +424,12 @@ export default function FinancialViewTab({
           </div>
         </div>
 
-        {/* Orçamento vs Custo Total */}
+        {/* Gasto Previsto vs Custo Total */}
         <div className="bg-white rounded-lg border p-6">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600 mb-1">
-                {budgetDiff === null ? 'Orçamento' : budgetDiff >= 0 ? 'Disponível' : 'Estouro'}
+                {budgetDiff === null ? 'Gasto Previsto' : budgetDiff >= 0 ? 'Disponível' : 'Estouro'}
               </p>
               <p className={`text-2xl font-bold ${
                 budgetDiff === null ? 'text-gray-400' :
@@ -438,7 +438,7 @@ export default function FinancialViewTab({
                 {budgetDiff === null ? '—' : formatCurrency(Math.abs(budgetDiff))}
               </p>
               {budgetDiff === null && (
-                <p className="text-xs text-gray-400">Defina orçamento na aba Tabela</p>
+                <p className="text-xs text-gray-400">Defina gasto previsto na aba Tabela</p>
               )}
             </div>
             <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
@@ -493,11 +493,11 @@ export default function FinancialViewTab({
           </div>
         </div>
 
-        {/* Alertas de Orçamento */}
+        {/* Alertas de Gasto Previsto */}
         <div className="bg-orange-50 border-2 border-orange-200 rounded-lg p-6">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <p className="text-sm text-orange-900 font-medium mb-1">Tarefas Acima do Orçamento</p>
+              <p className="text-sm text-orange-900 font-medium mb-1">Tarefas Acima do Gasto Previsto</p>
               <p className="text-2xl font-bold text-orange-700">
                 {budgetAlerts.length}
               </p>
@@ -510,7 +510,7 @@ export default function FinancialViewTab({
             {budgetAlerts.length > 0 ? (
               <span>Estouro total: {formatCurrency(budgetAlerts.reduce((sum, a) => sum + a.overrun, 0))}</span>
             ) : (
-              <span>✅ Todas as tarefas dentro do orçamento</span>
+              <span>✅ Todas as tarefas dentro do gasto previsto</span>
             )}
           </div>
         </div>
@@ -692,11 +692,11 @@ export default function FinancialViewTab({
         </div>
       )}
 
-      {/* ONDA 3: Alertas de Orçamento Estourado */}
+      {/* ONDA 3: Alertas de Gasto Previsto Estourado */}
       {budgetAlerts.length > 0 && (
         <div className="bg-white rounded-lg border p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            ⚠️ Tarefas Acima do Orçamento
+            ⚠️ Tarefas Acima do Gasto Previsto
           </h3>
 
           <div className="overflow-x-auto">
