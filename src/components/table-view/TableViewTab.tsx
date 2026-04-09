@@ -19,7 +19,7 @@ import { LoadingOverlay } from '@/components/ui/LoadingOverlay'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ConfirmModal } from '@/components/modals/ConfirmModal'
 import { DurationAdjustModal, DurationAdjustmentType } from '@/components/modals/DurationAdjustModal'
-import { PurchaseListModal, PurchaseListData } from '@/components/modals/PurchaseListModal'
+import { PurchaseListModal, PurchaseListData, PurchaseEntry } from '@/components/modals/PurchaseListModal'
 import AllocationModal from '@/components/AllocationModal'
 import { applyDurationAdjustment, calculateEndDateFromDuration } from '@/utils/taskDateSync'
 import { generateNextWbsCode } from '@/utils/wbs'
@@ -256,14 +256,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
     listId: string
     listName: string
     startDate: string
-    items: {
-      id: string
-      name: string
-      vendor: string
-      durationDays: number
-      estimatedCost: number
-      progress: number
-    }[]
+    entries: PurchaseEntry[]
   } | null>(null)
 
   // ==================== FILTERED TASKS ====================
@@ -670,30 +663,55 @@ export default function TableViewTab({ project }: TableViewTabProps) {
     const listTask = tasks.find(t => t.id === listId)
     if (!listTask) return
 
-    const items = tasks
+    const directChildren = tasks
       .filter(t => t.parent_id === listId)
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-      .map(t => {
-        // nome real = antes do " — " (fornecedor foi concatenado ao criar)
-        const separatorIndex = t.name.lastIndexOf(' — ')
-        const name = separatorIndex > 0 ? t.name.slice(0, separatorIndex) : t.name
-        const vendor = separatorIndex > 0 ? t.name.slice(separatorIndex + 3) : ''
-        const durationDays = Math.round((t.duration_minutes ?? 1440) / 1440)
+
+    const entries: PurchaseEntry[] = directChildren.map(child => {
+      const durationDays = Math.max(1, Math.round((child.duration_minutes ?? 1440) / 1440))
+
+      if (child.type === 'grupo_compras') {
+        // Grupo: carregar seus itens filhos
+        const groupItems = tasks
+          .filter(t => t.parent_id === child.id)
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+          .map(t => ({
+            id: t.id,
+            name: t.name,
+            durationDays: Math.max(1, Math.round((t.duration_minutes ?? 1440) / 1440)),
+            estimatedCost: t.estimated_cost ?? 0,
+            progress: t.progress ?? 0,
+          }))
         return {
-          id: t.id,
-          name,
-          vendor,
-          durationDays: Math.max(1, durationDays),
-          estimatedCost: t.estimated_cost ?? 0,
-          progress: t.progress ?? 0,
+          kind: 'group' as const,
+          group: {
+            id: child.id,
+            name: child.name,
+            durationDays,
+            items: groupItems,
+            progress: child.progress ?? 0,
+          },
         }
-      })
+      } else {
+        // Item avulso direto na lista
+        return {
+          kind: 'item' as const,
+          item: {
+            id: child.id,
+            name: child.name,
+            durationDays,
+            estimatedCost: child.estimated_cost ?? 0,
+            progress: child.progress ?? 0,
+          },
+        }
+      }
+    })
 
     setEditListModal({
       listId,
       listName: listTask.name,
       startDate: listTask.start_date ?? new Date().toISOString().split('T')[0],
-      items,
+      entries,
     })
   }, [tasks])
 
@@ -708,89 +726,177 @@ export default function TableViewTab({ project }: TableViewTabProps) {
     if (!editListModal) return
     setIsPurchaseListSaving(true)
     try {
-      const { listName, startDate, items, removedIds = [] } = data
+      const { listName, startDate, entries, removedIds = [] } = data
       const { listId } = editListModal
 
-      // 1. Deletar itens removidos
+      let nextSortOrder = tasks.length > 0
+        ? Math.max(...tasks.map(t => t.sort_order || 0)) + 1
+        : 1
+
+      // WBS da lista pai (ex: "3") — novos filhos serão "3.1", "3.2", etc.
+      const listTask = tasks.find(t => t.id === listId)
+      const parentWbs = listTask?.wbs_code ?? ''
+      // Maior índice WBS já existente entre filhos diretos da lista
+      const existingChildWbsNums = tasks
+        .filter(t => t.parent_id === listId && t.wbs_code)
+        .map(t => {
+          const parts = (t.wbs_code ?? '').split('.')
+          return parseInt(parts[parts.length - 1]) || 0
+        })
+      let nextWbsIdx = existingChildWbsNums.length > 0 ? Math.max(...existingChildWbsNums) + 1 : 1
+
+      // 1. Deletar tasks removidas (grupos e itens)
       if (removedIds.length > 0) {
         const { error } = await supabase.from('tasks').delete().in('id', removedIds)
         if (error) throw error
       }
 
-      // 2. Atualizar itens existentes
-      const existingItems = items.filter(item => item.id)
-      for (const item of existingItems) {
-        const endDateObj = new Date(startDate + 'T00:00:00')
-        endDateObj.setDate(endDateObj.getDate() + item.durationDays - 1)
-        const endDate = endDateObj.toISOString().split('T')[0]
-        const taskName = item.vendor ? `${item.name} — ${item.vendor}` : item.name.trim()
-
-        const { error } = await supabase
-          .from('tasks')
-          .update({
-            name: taskName,
-            duration_minutes: item.durationDays * 1440,
-            start_date: startDate,
-            end_date: endDate,
-            estimated_cost: item.estimatedCost,
-          })
-          .eq('id', item.id)
-        if (error) throw error
+      // Helper: calcular end_date dado startDate + durationDays
+      const calcEnd = (days: number) => {
+        const d = new Date(startDate + 'T00:00:00')
+        d.setDate(d.getDate() + days - 1)
+        return d.toISOString().split('T')[0]
       }
 
-      // 3. Inserir itens novos
-      const newItems = items.filter(item => !item.id)
-      if (newItems.length > 0) {
-        const maxSortOrder = tasks.length > 0
-          ? Math.max(...tasks.map(t => t.sort_order || 0))
-          : 0
-
-        const subtasks = newItems.map((item, i) => {
-          const endDateObj = new Date(startDate + 'T00:00:00')
-          endDateObj.setDate(endDateObj.getDate() + item.durationDays - 1)
-          const endDate = endDateObj.toISOString().split('T')[0]
-          const taskName = item.vendor ? `${item.name} — ${item.vendor}` : item.name.trim()
-
-          return {
-            name: taskName,
-            type: 'subtarefa' as const,
-            project_id: project.id,
-            duration_minutes: item.durationDays * 1440,
-            work_type: 'wait' as const,
-            progress: 0,
-            sort_order: maxSortOrder + 2 + i,
-            parent_id: listId,
-            outline_level: 1,
-            start_date: startDate,
-            end_date: endDate,
-            is_optional: false,
-            is_critical_path: false,
-            estimated_cost: item.estimatedCost || 0,
+      // 2. Processar cada entrada
+      for (const entry of entries) {
+        if (entry.kind === 'item') {
+          const item = entry.item
+          if (item.id) {
+            // UPDATE item existente
+            const { error } = await supabase.from('tasks').update({
+              name: item.name.trim(),
+              duration_minutes: item.durationDays * 1440,
+              start_date: startDate,
+              end_date: calcEnd(item.durationDays),
+              estimated_cost: item.estimatedCost,
+            }).eq('id', item.id)
+            if (error) throw error
+          } else {
+            // INSERT novo item avulso
+            const childWbs = parentWbs ? `${parentWbs}.${nextWbsIdx++}` : `${nextWbsIdx++}`
+            const { error } = await supabase.from('tasks').insert({
+              name: item.name.trim(),
+              type: 'subtarefa' as const,
+              project_id: project.id,
+              duration_minutes: item.durationDays * 1440,
+              work_type: 'wait' as const,
+              progress: item.progress ?? 0,
+              sort_order: nextSortOrder++,
+              parent_id: listId,
+              wbs_code: childWbs,
+              outline_level: 1,
+              start_date: startDate,
+              end_date: calcEnd(item.durationDays),
+              is_optional: false,
+              is_critical_path: false,
+              estimated_cost: item.estimatedCost || 0,
+            })
+            if (error) throw error
           }
-        })
+        } else {
+          // kind === 'group'
+          const group = entry.group
+          let groupId: string
+          let groupWbs: string
 
-        const { error } = await supabase.from('tasks').insert(subtasks)
-        if (error) throw error
+          // Calcular duração do grupo = max dos itens
+          const maxGroupDays = group.items.reduce((m, it) => Math.max(m, it.durationDays), 1)
+
+          if (group.id) {
+            // UPDATE grupo existente
+            const { error } = await supabase.from('tasks').update({
+              name: group.name.trim(),
+              duration_minutes: maxGroupDays * 1440,
+              start_date: startDate,
+              end_date: calcEnd(maxGroupDays),
+            }).eq('id', group.id)
+            if (error) throw error
+            groupId = group.id
+            groupWbs = tasks.find(t => t.id === group.id)?.wbs_code ?? (parentWbs ? `${parentWbs}.${nextWbsIdx}` : `${nextWbsIdx}`)
+          } else {
+            // INSERT novo grupo
+            groupWbs = parentWbs ? `${parentWbs}.${nextWbsIdx++}` : `${nextWbsIdx++}`
+            const { data: groupTask, error } = await supabase.from('tasks').insert({
+              name: group.name.trim(),
+              type: 'grupo_compras' as const,
+              project_id: project.id,
+              duration_minutes: maxGroupDays * 1440,
+              work_type: 'wait' as const,
+              progress: 0,
+              sort_order: nextSortOrder++,
+              parent_id: listId,
+              wbs_code: groupWbs,
+              outline_level: 1,
+              start_date: startDate,
+              end_date: calcEnd(maxGroupDays),
+              is_optional: false,
+              is_critical_path: false,
+              estimated_cost: 0,
+            }).select().single()
+            if (error) throw error
+            groupId = groupTask.id
+          }
+
+          // Maior índice WBS já existente entre filhos do grupo
+          const existingGroupChildNums = tasks
+            .filter(t => t.parent_id === groupId && t.wbs_code)
+            .map(t => {
+              const parts = (t.wbs_code ?? '').split('.')
+              return parseInt(parts[parts.length - 1]) || 0
+            })
+          let nextGroupItemWbs = existingGroupChildNums.length > 0 ? Math.max(...existingGroupChildNums) + 1 : 1
+
+          // Processar itens do grupo
+          for (const item of group.items) {
+            if (item.id) {
+              // UPDATE item existente
+              const { error } = await supabase.from('tasks').update({
+                name: item.name.trim(),
+                duration_minutes: item.durationDays * 1440,
+                start_date: startDate,
+                end_date: calcEnd(item.durationDays),
+                estimated_cost: item.estimatedCost,
+              }).eq('id', item.id)
+              if (error) throw error
+            } else {
+              // INSERT novo item dentro do grupo
+              const itemWbs = `${groupWbs}.${nextGroupItemWbs++}`
+              const { error } = await supabase.from('tasks').insert({
+                name: item.name.trim(),
+                type: 'subtarefa' as const,
+                project_id: project.id,
+                duration_minutes: item.durationDays * 1440,
+                work_type: 'wait' as const,
+                progress: item.progress ?? 0,
+                sort_order: nextSortOrder++,
+                parent_id: groupId,
+                wbs_code: itemWbs,
+                outline_level: 2,
+                start_date: startDate,
+                end_date: calcEnd(item.durationDays),
+                is_optional: false,
+                is_critical_path: false,
+                estimated_cost: item.estimatedCost || 0,
+              })
+              if (error) throw error
+            }
+          }
+        }
       }
 
-      // 4. Atualizar tarefa pai (nome, datas, duração = span dos itens)
-      const allItems = items.filter(item => !removedIds.includes(item.id ?? ''))
-      const latestEnd = allItems.reduce((latest, item) => {
-        const endDate = new Date(startDate + 'T00:00:00')
-        endDate.setDate(endDate.getDate() + item.durationDays - 1)
-        return endDate > latest ? endDate : latest
-      }, new Date(startDate + 'T00:00:00'))
-
-      const spanDays = Math.round(
-        (latestEnd.getTime() - new Date(startDate + 'T00:00:00').getTime()) / (1000 * 60 * 60 * 24)
-      ) + 1
+      // 3. Atualizar tarefa pai (nome, datas, duração = span de todas as entradas)
+      const allDays = entries.flatMap(e =>
+        e.kind === 'item' ? [e.item.durationDays] : e.group.items.map(it => it.durationDays)
+      )
+      const spanDays = allDays.length > 0 ? Math.max(...allDays) : 1
 
       const { error: parentError } = await supabase
         .from('tasks')
         .update({
           name: listName,
           start_date: startDate,
-          end_date: latestEnd.toISOString().split('T')[0],
+          end_date: calcEnd(spanDays),
           duration_minutes: spanDays * 1440,
         })
         .eq('id', listId)
@@ -820,22 +926,19 @@ export default function TableViewTab({ project }: TableViewTabProps) {
 
       const wbsCode = generateNextWbsCode(tasks, null)
 
-      // Calcular end_date e duração da lista:
-      // span = max(end_date dos itens) - start_date + 1 (dias corridos)
-      // Não soma durações — itens paralelos não adicionam ao span da lista
-      const startDateObj = new Date(data.startDate + 'T00:00:00')
-      const latestEndDateObj = data.items.reduce((latest, item) => {
-        const itemEnd = new Date(data.startDate + 'T00:00:00')
-        itemEnd.setDate(itemEnd.getDate() + item.durationDays - 1)
-        return itemEnd > latest ? itemEnd : latest
-      }, new Date(startDateObj))
-      const listEndDate = latestEndDateObj.toISOString().split('T')[0]
-      // Span em dias corridos = diferença de datas + 1
-      const spanDays = Math.round(
-        (latestEndDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24)
-      ) + 1
+      // Calcular span da lista = max de todos os durationDays (itens + grupos)
+      const allDays = data.entries.flatMap(e =>
+        e.kind === 'item' ? [e.item.durationDays] : e.group.items.map(it => it.durationDays)
+      )
+      const spanDays = allDays.length > 0 ? Math.max(...allDays) : 1
 
-      // Criar tarefa pai diretamente via supabase (evita toasts intermediários da mutation)
+      const calcEnd = (days: number) => {
+        const d = new Date(data.startDate + 'T00:00:00')
+        d.setDate(d.getDate() + days - 1)
+        return d.toISOString().split('T')[0]
+      }
+
+      // Criar tarefa pai lista_compras
       const { data: parentTask, error: parentError } = await supabase
         .from('tasks')
         .insert({
@@ -850,7 +953,7 @@ export default function TableViewTab({ project }: TableViewTabProps) {
           wbs_code: wbsCode,
           outline_level: 0,
           start_date: data.startDate,
-          end_date: listEndDate,
+          end_date: calcEnd(spanDays),
           is_optional: false,
           is_critical_path: false,
         })
@@ -859,41 +962,87 @@ export default function TableViewTab({ project }: TableViewTabProps) {
 
       if (parentError) throw parentError
 
-      // Criar subtarefas em lote
-      const subtasks = data.items.map((item, i) => {
-        const itemEndDateObj = new Date(data.startDate + 'T00:00:00')
-        itemEndDateObj.setDate(itemEndDateObj.getDate() + item.durationDays - 1)
-        const itemEndDate = itemEndDateObj.toISOString().split('T')[0]
+      let childSortOrder = maxSortOrder + 2
+      let totalLeafCount = 0
 
-        return {
-          name: item.vendor ? `${item.name} — ${item.vendor}` : item.name.trim(),
-          type: 'subtarefa' as const,
-          project_id: project.id,
-          duration_minutes: item.durationDays * 1440,
-          work_type: 'wait' as const,
-          progress: 0,
-          sort_order: maxSortOrder + 2 + i,
-          parent_id: parentTask.id,
-          wbs_code: `${wbsCode}.${i + 1}`,
-          outline_level: 1,
-          start_date: data.startDate,
-          end_date: itemEndDate,
-          is_optional: false,
-          is_critical_path: false,
-          estimated_cost: item.estimatedCost || 0,
+      // Processar entradas
+      for (const entry of data.entries) {
+        if (entry.kind === 'item') {
+          const item = entry.item
+          await supabase.from('tasks').insert({
+            name: item.name.trim(),
+            type: 'subtarefa' as const,
+            project_id: project.id,
+            duration_minutes: item.durationDays * 1440,
+            work_type: 'wait' as const,
+            progress: 0,
+            sort_order: childSortOrder++,
+            parent_id: parentTask.id,
+            wbs_code: `${wbsCode}.${totalLeafCount + 1}`,
+            outline_level: 1,
+            start_date: data.startDate,
+            end_date: calcEnd(item.durationDays),
+            is_optional: false,
+            is_critical_path: false,
+            estimated_cost: item.estimatedCost || 0,
+          })
+          totalLeafCount++
+        } else {
+          // Grupo (fornecedor)
+          const group = entry.group
+          const maxGroupDays = group.items.reduce((m, it) => Math.max(m, it.durationDays), 1)
+
+          const { data: groupTask, error: groupError } = await supabase.from('tasks').insert({
+            name: group.name.trim(),
+            type: 'grupo_compras' as const,
+            project_id: project.id,
+            duration_minutes: maxGroupDays * 1440,
+            work_type: 'wait' as const,
+            progress: 0,
+            sort_order: childSortOrder++,
+            parent_id: parentTask.id,
+            outline_level: 1,
+            start_date: data.startDate,
+            end_date: calcEnd(maxGroupDays),
+            is_optional: false,
+            is_critical_path: false,
+            estimated_cost: 0,
+          }).select().single()
+          if (groupError) throw groupError
+
+          // Itens dentro do grupo
+          const groupItems = group.items.map((item, i) => ({
+            name: item.name.trim(),
+            type: 'subtarefa' as const,
+            project_id: project.id,
+            duration_minutes: item.durationDays * 1440,
+            work_type: 'wait' as const,
+            progress: 0,
+            sort_order: childSortOrder + i,
+            parent_id: groupTask.id,
+            outline_level: 2,
+            start_date: data.startDate,
+            end_date: calcEnd(item.durationDays),
+            is_optional: false,
+            is_critical_path: false,
+            estimated_cost: item.estimatedCost || 0,
+          }))
+
+          if (groupItems.length > 0) {
+            const { error: itemsError } = await supabase.from('tasks').insert(groupItems)
+            if (itemsError) throw itemsError
+            childSortOrder += groupItems.length
+            totalLeafCount += groupItems.length
+          }
         }
-      })
+      }
 
-      const { error: subtasksError } = await supabase.from('tasks').insert(subtasks)
-      if (subtasksError) throw subtasksError
-
-      // Invalidar cache para recarregar a tabela via React Query
       await queryClient.invalidateQueries({
         queryKey: queryKeys.tasks.byProject(project.id)
       })
 
       setIsPurchaseListModalOpen(false)
-      dispatchToast(`Lista "${data.listName}" criada com ${data.items.length} item(ns)!`, 'success')
+      dispatchToast(`Lista "${data.listName}" criada com ${totalLeafCount} item(ns)!`, 'success')
     } catch (error) {
       console.error('Error creating purchase list:', error)
       dispatchToast('Erro ao criar lista de compras', 'error')
@@ -1065,10 +1214,9 @@ export default function TableViewTab({ project }: TableViewTabProps) {
           onConfirm={handleSaveEditedList}
           isLoading={isPurchaseListSaving}
           editMode={true}
-          editListId={editListModal.listId}
           editListName={editListModal.listName}
           editStartDate={editListModal.startDate}
-          editItems={editListModal.items}
+          editEntries={editListModal.entries}
         />
       )}
 

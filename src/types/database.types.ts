@@ -108,7 +108,7 @@ export type Database = {
           id: string
           project_id: string
           name: string
-          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa' | 'lista_compras'
+          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa' | 'lista_compras' | 'grupo_compras'
           parent_id: string | null
 
           // NOVOS CAMPOS - Sistema de Minutos (ONDA 1)
@@ -142,7 +142,7 @@ export type Database = {
           id?: string
           project_id: string
           name: string
-          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa' | 'lista_compras'
+          type: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa' | 'lista_compras' | 'grupo_compras'
           parent_id?: string | null
 
           // NOVOS CAMPOS (Sistema de Minutos)
@@ -169,7 +169,7 @@ export type Database = {
           id?: string
           project_id?: string
           name?: string
-          type?: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa' | 'lista_compras'
+          type?: 'projeto_mecanico' | 'compras_mecanica' | 'projeto_eletrico' | 'compras_eletrica' | 'fabricacao' | 'tratamento_superficial' | 'montagem_mecanica' | 'montagem_eletrica' | 'coleta' | 'subtarefa' | 'lista_compras' | 'grupo_compras'
           parent_id?: string | null
 
           // NOVOS CAMPOS (Sistema de Minutos)
