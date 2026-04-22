@@ -1,8 +1,22 @@
 import { useState, useMemo, useCallback } from 'react'
 import { Task } from '@/types/database.types'
 
-type SortBy = 'name' | 'type' | 'duration' | 'progress'
+type SortBy = 'wbs' | 'name' | 'type' | 'duration' | 'progress'
 type SortOrder = 'asc' | 'desc'
+
+// Compara dois WBS codes numericamente (ex: "1.2.10" > "1.2.9")
+function compareWbs(a: string | null | undefined, b: string | null | undefined): number {
+  if (!a && !b) return 0
+  if (!a) return 1
+  if (!b) return -1
+  const partsA = a.split('.').map(Number)
+  const partsB = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    const diff = (partsA[i] ?? 0) - (partsB[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
 
 /**
  * Hook para gerenciar filtros e ordenação da tabela
@@ -12,7 +26,7 @@ type SortOrder = 'asc' | 'desc'
  */
 export function useTableFilters() {
   const [searchTerm, setSearchTerm] = useState('')
-  const [sortBy, setSortBy] = useState<SortBy>('name')
+  const [sortBy, setSortBy] = useState<SortBy>('wbs')
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc')
 
   /**
@@ -43,6 +57,9 @@ export function useTableFilters() {
       let comparison = 0
 
       switch (sortBy) {
+        case 'wbs':
+          comparison = compareWbs(a.wbs_code, b.wbs_code)
+          break
         case 'name':
           comparison = a.name.localeCompare(b.name)
           break

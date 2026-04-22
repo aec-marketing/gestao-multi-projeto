@@ -11,6 +11,10 @@ interface TableToolbarProps {
   onAddTask: () => void
   isAddingTask: boolean
   onAddPurchaseList?: () => void
+  expandedCount: number
+  totalParentCount: number
+  onExpandAll: () => void
+  onCollapseAll: () => void
 }
 
 /**
@@ -27,6 +31,10 @@ export const TableToolbar = React.memo(function TableToolbar({
   onAddTask,
   isAddingTask,
   onAddPurchaseList,
+  expandedCount,
+  totalParentCount,
+  onExpandAll,
+  onCollapseAll,
 }: TableToolbarProps) {
   return (
     <div className="p-6 border-b space-y-4">
@@ -56,6 +64,7 @@ export const TableToolbar = React.memo(function TableToolbar({
             onChange={(e) => onSortByChange(e.target.value)}
             className="border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 bg-white focus:ring-2 focus:ring-blue-500"
           >
+            <option value="wbs">WBS</option>
             <option value="name">Nome</option>
             <option value="type">Tipo</option>
             <option value="duration">Duração</option>
@@ -78,7 +87,7 @@ export const TableToolbar = React.memo(function TableToolbar({
         )}
       </div>
 
-      {/* Add task buttons */}
+      {/* Add task buttons + expand/collapse */}
       {!searchTerm && (
         <div className="flex items-center gap-4">
           <button
@@ -104,6 +113,27 @@ export const TableToolbar = React.memo(function TableToolbar({
             >
               🛒 Lista de Compras
             </button>
+          )}
+          {totalParentCount > 0 && (
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={onExpandAll}
+                disabled={expandedCount === totalParentCount}
+                className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-40 transition-colors"
+                title="Expandir todas as tarefas"
+              >
+                ▼ Expandir tudo
+              </button>
+              <span className="text-gray-300">|</span>
+              <button
+                onClick={onCollapseAll}
+                disabled={expandedCount === 0}
+                className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-40 transition-colors"
+                title="Recolher todas as tarefas"
+              >
+                ▶ Recolher tudo
+              </button>
+            </div>
           )}
         </div>
       )}

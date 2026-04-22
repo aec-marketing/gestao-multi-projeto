@@ -17,6 +17,7 @@ export type Database = {
           end_date: string | null
           target_end_date: string | null  // Data alvo/limite do projeto
           is_active: boolean
+          status: 'ativo' | 'pausado' | 'concluido'
           notes: string | null
           client_name: string | null      // Nome do cliente
           client_logo_url: string | null  // URL da logo do cliente
@@ -39,6 +40,7 @@ export type Database = {
           end_date?: string | null
           target_end_date?: string | null
           is_active?: boolean
+          status?: 'ativo' | 'pausado' | 'concluido'
           notes?: string | null
           client_name?: string | null
           client_logo_url?: string | null
@@ -59,6 +61,7 @@ export type Database = {
           end_date?: string | null
           target_end_date?: string | null  // Data alvo/limite do projeto
           is_active?: boolean
+          status?: 'ativo' | 'pausado' | 'concluido'
           notes?: string | null
           client_name?: string | null
           client_logo_url?: string | null
@@ -224,6 +227,7 @@ export type TaskWithProject = Task & {
 
 export type ProjectCategory = Project['category']
 export type ProjectComplexity = Project['complexity']
+export type ProjectStatus = Project['status']
 export type ResourceRole = Resource['role']
 export type TaskType = Task['type']
 

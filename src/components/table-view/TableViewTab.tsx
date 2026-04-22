@@ -251,6 +251,26 @@ export default function TableViewTab({ project }: TableViewTabProps) {
   const [isPurchaseListModalOpen, setIsPurchaseListModalOpen] = useState(false)
   const [isPurchaseListSaving, setIsPurchaseListSaving] = useState(false)
 
+  // Expandir/colapsar tarefas pai
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
+
+  const parentIds = React.useMemo(
+    () => new Set(tasks.filter(t => tasks.some(c => c.parent_id === t.id)).map(t => t.id)),
+    [tasks]
+  )
+
+  const handleToggleCollapse = useCallback((taskId: string) => {
+    setCollapsedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }, [])
+
+  const handleExpandAll = useCallback(() => setCollapsedIds(new Set()), [])
+  const handleCollapseAll = useCallback(() => setCollapsedIds(new Set(parentIds)), [parentIds])
+
   // Purchase List Modal state (edição)
   const [editListModal, setEditListModal] = useState<{
     listId: string
@@ -1098,6 +1118,10 @@ export default function TableViewTab({ project }: TableViewTabProps) {
           onAddTask={() => setIsAddingTask(true)}
           isAddingTask={isAddingTask}
           onAddPurchaseList={() => setIsPurchaseListModalOpen(true)}
+          expandedCount={parentIds.size - collapsedIds.size}
+          totalParentCount={parentIds.size}
+          onExpandAll={handleExpandAll}
+          onCollapseAll={handleCollapseAll}
         />
 
         {/* Resumo de Custos */}
@@ -1180,6 +1204,8 @@ export default function TableViewTab({ project }: TableViewTabProps) {
                     isSavingSubtask={createTaskMutation.isPending && addingSubtaskTo !== null}
                     onCloseSubtasks={handleCloseSubtasks}
                     onEditList={handleEditList}
+                    collapsedIds={collapsedIds}
+                    onToggleCollapse={handleToggleCollapse}
                   />
                 ))}
               </tbody>

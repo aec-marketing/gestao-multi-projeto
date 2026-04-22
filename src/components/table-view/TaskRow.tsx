@@ -35,6 +35,8 @@ interface TaskRowProps {
   isSavingSubtask: boolean
   onCloseSubtasks: (taskId: string, taskName: string, subtaskCount: number) => void
   onEditList?: (taskId: string) => void
+  collapsedIds: Set<string>
+  onToggleCollapse: (taskId: string) => void
 }
 
 /**
@@ -63,7 +65,9 @@ export const TaskRow = React.memo(function TaskRow({
   onCancelSubtask,
   isSavingSubtask,
   onCloseSubtasks,
-  onEditList
+  onEditList,
+  collapsedIds,
+  onToggleCollapse,
 }: TaskRowProps) {
   // Subtasks
   const subtasks = useMemo(
@@ -135,6 +139,15 @@ export const TaskRow = React.memo(function TaskRow({
         <td className="px-4 py-2">
           <div className="flex items-center gap-2" style={{ paddingLeft: `${indent}px` }}>
             {level > 0 && <span className="text-gray-400">└─</span>}
+            {hasSubtasks && (
+              <button
+                onClick={() => onToggleCollapse(task.id)}
+                className="shrink-0 w-4 h-4 flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors"
+                title={collapsedIds.has(task.id) ? 'Expandir' : 'Recolher'}
+              >
+                {collapsedIds.has(task.id) ? '▶' : '▼'}
+              </button>
+            )}
             <TaskEditCell
               value={getCurrentValue(task.id, 'name', task.name)}
               type="text"
@@ -402,8 +415,8 @@ export const TaskRow = React.memo(function TaskRow({
         />
       )}
 
-      {/* Renderização recursiva das subtarefas */}
-      {subtasks.map(subtask => (
+      {/* Renderização recursiva das subtarefas (omitida se pai colapsado) */}
+      {!collapsedIds.has(task.id) && subtasks.map(subtask => (
         <TaskRow
           key={subtask.id}
           task={subtask}
@@ -421,13 +434,15 @@ export const TaskRow = React.memo(function TaskRow({
           addingSubtaskTo={addingSubtaskTo}
           newSubtaskData={newSubtaskData}
           onSubtaskNameChange={onSubtaskNameChange}
-          onSubtaskWorkTypeChange={onSubtaskWorkTypeChange}  // ONDA 3: Added
+          onSubtaskWorkTypeChange={onSubtaskWorkTypeChange}
           onSubtaskDurationChange={onSubtaskDurationChange}
           onSaveSubtask={onSaveSubtask}
           onCancelSubtask={onCancelSubtask}
           isSavingSubtask={isSavingSubtask}
           onCloseSubtasks={onCloseSubtasks}
           onEditList={onEditList}
+          collapsedIds={collapsedIds}
+          onToggleCollapse={onToggleCollapse}
         />
       ))}
     </>

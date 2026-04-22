@@ -34,6 +34,7 @@ export default function Dashboard() {
   const [projectsLoading, setProjectsLoading] = useState(true)
   const [showNewProjectForm, setShowNewProjectForm] = useState(false)
   const [showResourceManager, setShowResourceManager] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<'ativo' | 'pausado' | 'concluido' | 'todos'>('ativo')
 
   useEffect(() => {
     loadProjects()
@@ -44,7 +45,6 @@ export default function Dashboard() {
       const { data: projectsData } = await supabase
         .from('projects')
         .select('*')
-        .eq('is_active', true)
         .order('created_at', { ascending: false })
 
       setProjects(projectsData || [])
@@ -54,6 +54,11 @@ export default function Dashboard() {
       setProjectsLoading(false)
     }
   }
+
+  const filteredProjects = projects.filter(p => {
+    if (statusFilter === 'todos') return true
+    return (p.status ?? 'ativo') === statusFilter
+  })
 
   function handleNewProjectSuccess() {
     setShowNewProjectForm(false)
@@ -72,7 +77,7 @@ export default function Dashboard() {
   // Calcular estatísticas
   const stats = {
     totalProjects: projects.length,
-    activeProjects: projects.filter(p => p.is_active).length,
+    activeProjects: projects.filter(p => (p.status ?? 'ativo') === 'ativo').length,
     totalResources: resources.length,
     managers: resources.filter(r => r.hierarchy === 'gerente').length,
     leaders: resources.filter(r => r.hierarchy === 'lider').length,
@@ -256,28 +261,33 @@ export default function Dashboard() {
         <div className="mb-8">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-semibold text-gray-900">
-              Projetos Ativos ({stats.activeProjects})
+              Projetos ({filteredProjects.length})
             </h2>
-            <div className="flex space-x-2">
-              <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">Todos os status</option>
-                <option value="em_andamento">Em andamento</option>
-                <option value="pausado">Pausado</option>
-                <option value="concluido">Concluído</option>
-              </select>
-              <select className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                <option value="">Todas as categorias</option>
-                <option value="projeto_mecanico">Projeto Mecânico</option>
-                <option value="projeto_eletrico">Projeto Elétrico</option>
-                <option value="projeto_completo">Projeto Completo</option>
-                <option value="manutencao">Manutenção</option>
-                <option value="retrofit">Retrofit</option>
-              </select>
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              {([
+                { key: 'ativo',     label: 'Ativos',     dot: 'bg-green-500'  },
+                { key: 'pausado',   label: 'Pausados',   dot: 'bg-yellow-500' },
+                { key: 'concluido', label: 'Concluídos', dot: 'bg-gray-400'   },
+                { key: 'todos',     label: 'Todos',      dot: null            },
+              ] as const).map(({ key, label, dot }) => (
+                <button
+                  key={key}
+                  onClick={() => setStatusFilter(key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 transition-colors border-r border-gray-200 last:border-r-0 ${
+                    statusFilter === key
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {dot && <span className={`w-2 h-2 rounded-full ${dot} ${statusFilter === key ? 'opacity-80' : ''}`} />}
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
-          
+
           <ProjectList
-            projects={projects}
+            projects={filteredProjects}
             resources={resources}
             onRefresh={loadProjects}
           />
