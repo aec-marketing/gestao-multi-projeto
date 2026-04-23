@@ -157,7 +157,7 @@ export async function importMSProject(
       let durationMinutes: number
 
       if ((task.durationMinutes === 0 || task.durationMinutes == null) && !task.isSummary) {
-        // Tarefa com duração zero E não é summary = MILESTONE real
+        // Tarefa com duração zero = milestone; banco exige duration=0 para milestone e >=1 para work/wait
         workType = 'milestone'
         durationMinutes = 0
       } else if (isSelfPurchase || isChildOfPurchase) {
