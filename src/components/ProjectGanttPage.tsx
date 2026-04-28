@@ -10,6 +10,7 @@ import TimelineViewTab from './project-views/TimelineViewTab'
 import FinancialViewTab from '@/components/project-views/FinancialViewTab'
 import PredecessorViewTab from './project-views/PredecessorViewTab'
 import EditProjectButton from '@/components/modals/EditProjectButton'
+import { ExportModal } from '@/components/modals/ExportModal'
 import { BufferStatusIndicator } from '@/components/gantt/BufferBar'
 import { recalculateProjectEndDate } from '@/lib/project-service'
 import { ComponentErrorBoundary } from '@/components/error-boundary'
@@ -57,6 +58,7 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
   const [allocations, setAllocations] = useState<Allocation[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>('gantt')
   const [loading, setLoading] = useState(true)
+  const [showExportModal, setShowExportModal] = useState(false)
 
   // Carregar dados
   useEffect(() => {
@@ -190,7 +192,10 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
               <button className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                 💾 Salvar
               </button>
-              <button className="px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+              <button
+                onClick={() => setShowExportModal(true)}
+                className="px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
                 📤 Exportar
               </button>
               <button className="px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
@@ -308,6 +313,16 @@ export default function ProjectGanttPage({ projectId, highlightTaskId }: Project
   </ComponentErrorBoundary>
 )}
       </main>
+
+      {showExportModal && (
+        <ExportModal
+          projectName={project.name}
+          tasks={tasks}
+          allocations={allocations}
+          resources={resources}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
     </div>
   )
 }
